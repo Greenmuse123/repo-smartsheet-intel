@@ -1,3 +1,9 @@
+# Interactive browser demo (no setup)
+
+For a live click-through in front of the PM, open **https://repo-smartsheet-intel.vercel.app/demo/** and press **Play the story** (or edit a file and press Sync). It runs the real engine in the browser; no account or token. The terminal `rsi demo` below is the equivalent for a CLI walkthrough.
+
+---
+
 # Demo script (3-5 minutes)
 
 Audience: an engineering/product team. Setup: terminal in `app/`, `npm install` done, Smartsheet open in a browser tab (or skip to the CSV variant). Every command below is real output from the bundled sample repository "Orderly".
