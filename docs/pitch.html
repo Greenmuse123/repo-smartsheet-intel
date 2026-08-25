@@ -227,6 +227,44 @@
 
   .toggle { position: fixed; top: 16px; right: 16px; z-index: 20; background: var(--card); border: 1px solid var(--line-2); color: var(--ink-2); border-radius: 999px; padding: 7px 14px; font-family: "IBM Plex Mono", monospace; font-size: 12px; cursor: pointer; box-shadow: var(--shadow); }
   .toggle:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  /* ELI5 */
+  #eli5 { background: var(--paper-2); }
+  .toybox { margin-top: 30px; max-width: 68ch; }
+  .toybox p {
+    font-size: 19px; line-height: 1.7; color: var(--ink); max-width: none;
+    padding: 4px 0 14px 22px; margin: 0 0 6px; border-left: 3px solid var(--accent-soft);
+  }
+  .toybox p b { color: var(--accent); font-weight: 600; font-style: normal; }
+  .toybox p:first-of-type { font-family: "Fraunces", serif; font-size: 24px; font-weight: 500; border-left-color: var(--accent); }
+
+  .feat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 34px; }
+  @media (max-width: 860px) { .feat-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { .feat-grid { grid-template-columns: 1fr; } }
+  .feat { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px; box-shadow: var(--shadow); }
+  .feat .lab { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); }
+  .feat h4 { margin: 9px 0 8px; font-size: 17px; font-family: "IBM Plex Sans", sans-serif; font-weight: 600; }
+  .feat p { font-size: 14px; color: var(--ink-2); margin: 0; }
+
+  .dash-title { margin-top: 60px; font-size: clamp(22px, 3vw, 30px); font-weight: 600; }
+  .dash { margin-top: 26px; background: var(--card); border: 1px solid var(--line-2); border-radius: 16px; padding: 26px; box-shadow: var(--shadow); }
+  .metrics { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+  @media (max-width: 780px) { .metrics { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 420px) { .metrics { grid-template-columns: 1fr; } }
+  .metric { border: 1px solid var(--line); border-radius: 12px; padding: 16px; background: var(--paper); position: relative; overflow: hidden; }
+  .metric::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--mc, var(--accent)); }
+  .metric .v { font-family: "Fraunces", serif; font-size: 38px; font-weight: 600; line-height: 1; color: var(--mc, var(--ink)); font-variant-numeric: tabular-nums; }
+  .metric .l { font-family: "IBM Plex Mono", monospace; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); margin-top: 8px; }
+  .m-open { --mc: var(--info); } .m-done { --mc: var(--good); } .m-block { --mc: var(--good); } .m-hi { --mc: var(--crit); } .m-rev { --mc: var(--warn); }
+
+  .bars { margin-top: 26px; padding-top: 22px; border-top: 1px dashed var(--line-2); }
+  .bars .bh { font-family: "IBM Plex Mono", monospace; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); margin-bottom: 14px; }
+  .bar { display: grid; grid-template-columns: 96px 1fr 30px; align-items: center; gap: 12px; margin-bottom: 9px; }
+  .bar .bl { font-size: 13px; color: var(--ink-2); text-align: right; }
+  .bar .bt { height: 12px; background: var(--paper-2); border-radius: 6px; overflow: hidden; }
+  .bar .bf { height: 100%; background: var(--accent); border-radius: 6px; }
+  .bar .bn { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-3); text-align: right; font-variant-numeric: tabular-nums; }
+  .dash-note { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-3); margin-top: 18px; }
+
 </style>
 
 <button class="toggle" id="tg" aria-label="Toggle light or dark theme">theme</button>
@@ -270,6 +308,21 @@
     </div>
   </div>
 </header>
+
+<section id="eli5">
+  <div class="wrap">
+    <p class="eyebrow">Explain it like I am 5</p>
+    <h2 class="sec">The toy-box version.</h2>
+    <div class="toybox">
+      <p>Imagine your software project is a giant toy box.</p>
+      <p>Lots of important notes are hidden inside it: little reminders to fix things, a list of what is already finished, a diary of every change.</p>
+      <p>Our program looks through the box and finds the useful notes. It does not throw anything away, and it does not move anything. It only <b>reads</b>.</p>
+      <p>Then it writes neat copies of those notes onto a big checklist that the whole team can see. That checklist is <b>Smartsheet</b>.</p>
+      <p>When something in the toy box changes, the program checks again and updates the checklist on the <b>same line</b>, so you never end up with two copies of one note.</p>
+      <p>And if the program is not sure about something, it does not guess. It puts a little <b>flag</b> on it and asks a grown-up to look.</p>
+    </div>
+  </div>
+</section>
 
 <section id="problem">
   <div class="wrap">
@@ -397,6 +450,47 @@
       </div>
     </div>
     <p class="caption">6 of 23 rows shown. Full sheet has 22 columns; the technical ones hide behind the main view.</p>
+  </div>
+</section>
+
+<section id="smartsheet">
+  <div class="wrap">
+    <p class="eyebrow">Smartsheet, used properly</p>
+    <h2 class="sec">Not just rows in a grid. The whole toolset, wired up for you.</h2>
+    <p class="sub">The rows are the start. What turns the sheet into something that runs a project is Smartsheet own features, set up so the sheet reacts, alerts, and summarizes on its own, with no one babysitting it.</p>
+    <div class="feat-grid">
+      <div class="feat"><div class="lab">Column types</div><h4>Dropdowns and real contacts</h4><p>Type, Status, Priority and Confidence are proper single-select dropdowns, not free text. Owner is a Contact, so Smartsheet knows it is a real person it can notify.</p></div>
+      <div class="feat"><div class="lab">Conditional formatting</div><h4>The sheet colours itself</h4><p>Rows turn red when the code and a person disagree, amber when something is flagged for review, and grey when an item vanished from the code. Trouble is visible at a glance.</p></div>
+      <div class="feat"><div class="lab">Saved filter</div><h4>&ldquo;Needs my attention&rdquo;</h4><p>One shared view that shows only the rows that are blocked, in conflict, or flagged for review. Everyone opens the same filter and sees exactly what is on fire.</p></div>
+      <div class="feat"><div class="lab">Automations</div><h4>Alerts that send themselves</h4><p>When a row is flagged for review, Smartsheet emails the Owner. A weekly reminder nudges anyone sitting on a blocked item. No one has to remember to chase.</p></div>
+      <div class="feat"><div class="lab">Forms and update requests</div><h4>Ask the team, safely</h4><p>Where the code never named an owner, Smartsheet sends an update request asking who owns this. The answer drops into the row, and the sync never overwrites it.</p></div>
+      <div class="feat"><div class="lab">Dashboard and reports</div><h4>Status without opening the sheet</h4><p>A live summary sheet of counts, built from cross-sheet formulas, feeds charts and a report so leadership sees where things stand without touching a single row.</p></div>
+    </div>
+
+    <h3 class="dash-title">The one screen a manager opens first.</h3>
+    <p class="sub">A dashboard built from cross-sheet formulas over the same sheet. It answers what needs my attention in about five seconds. These are the real counts from the demo repository.</p>
+    <div class="dash">
+      <div class="metrics">
+        <div class="metric m-open"><div class="v">17</div><div class="l">Open items</div></div>
+        <div class="metric m-done"><div class="v">6</div><div class="l">Completed</div></div>
+        <div class="metric m-block"><div class="v">0</div><div class="l">Blocked</div></div>
+        <div class="metric m-hi"><div class="v">1</div><div class="l">High priority</div></div>
+        <div class="metric m-rev"><div class="v">3</div><div class="l">Needs review</div></div>
+      </div>
+      <div class="bars">
+        <div class="bh">Items by type</div>
+        <div class="bar"><span class="bl">Task</span><span class="bt"><span class="bf" style="width:100%"></span></span><span class="bn">9</span></div>
+        <div class="bar"><span class="bl">Release</span><span class="bt"><span class="bf" style="width:44%"></span></span><span class="bn">4</span></div>
+        <div class="bar"><span class="bl">Risk</span><span class="bt"><span class="bf" style="width:33%"></span></span><span class="bn">3</span></div>
+        <div class="bar"><span class="bl">Test</span><span class="bt"><span class="bf" style="width:22%"></span></span><span class="bn">2</span></div>
+        <div class="bar"><span class="bl">Bug</span><span class="bt"><span class="bf" style="width:11%"></span></span><span class="bn">1</span></div>
+        <div class="bar"><span class="bl">Tech Debt</span><span class="bt"><span class="bf" style="width:11%"></span></span><span class="bn">1</span></div>
+        <div class="bar"><span class="bl">Documentation</span><span class="bt"><span class="bf" style="width:11%"></span></span><span class="bn">1</span></div>
+        <div class="bar"><span class="bl">Dependency</span><span class="bt"><span class="bf" style="width:11%"></span></span><span class="bn">1</span></div>
+        <div class="bar"><span class="bl">Decision</span><span class="bt"><span class="bf" style="width:11%"></span></span><span class="bn">1</span></div>
+      </div>
+      <p class="dash-note">Built from cross-sheet COUNTIF formulas. Every number traces back to rows a person can open and verify.</p>
+    </div>
   </div>
 </section>
 
