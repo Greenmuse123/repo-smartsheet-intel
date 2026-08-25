@@ -1,0 +1,32 @@
+{
+  "name": "repo-smartsheet-intel",
+  "version": "0.1.0",
+  "description": "Turns an existing software repository into accurate, traceable, human-reviewable Smartsheet project data. Never invents a fact.",
+  "type": "module",
+  "bin": { "rsi": "./bin/rsi.mjs" },
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "rsi": "tsx src/cli/index.ts",
+    "demo:report": "tsx src/cli/index.ts report --config examples/sample-repo.project-config.yaml",
+    "demo:dry-run": "tsx src/cli/index.ts sync --dry-run --config examples/sample-repo.project-config.yaml",
+    "demo:csv": "tsx src/cli/index.ts export-csv --config examples/sample-repo.project-config.yaml"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "yaml": "^2.5.0"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/sdk": "^0.30.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "license": "MIT"
+}

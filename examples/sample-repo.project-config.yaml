@@ -1,0 +1,10 @@
+# Demo configuration: points at the bundled sample repository.
+project:
+  name: Orderly
+  repository: ./sample-repo
+track:
+  - everything
+smartsheet:
+  sheetName: Orderly — Repo Intelligence
+output:
+  dir: ../output/orderly
