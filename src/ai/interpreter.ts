@@ -2,8 +2,8 @@
  * Optional AI interpretation (OFF by default).
  *
  * What: asks Claude for a plain-language summary and an optional risk note per item, using ONLY
- *       already-redacted excerpts (≤ maxExcerptChars). Output lands in `aiSuggestion` and — only
- *       when the item has no description — a labeled "[AI summary]" description. It never changes
+ *       already-redacted excerpts (≤ maxExcerptChars). Output lands in `aiSuggestion` and - only
+ *       when the item has no description - a labeled "[AI summary]" description. It never changes
  *       Type, Status, Owner, Priority, Confidence or evidence.
  * Use:  `await interpretItems(items, { enabled, model, maxExcerptChars, apiKey })`.
  * Depends on: @anthropic-ai/sdk (optional dependency, imported lazily).

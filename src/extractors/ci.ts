@@ -2,7 +2,7 @@
  * Extractor: CI/CD configuration.
  *
  * Yields: one evidence per pipeline file with its declared name and job names.
- *         The sourceType hints the item type: "runs tests" / "deploys" / neither — only
+ *         The sourceType hints the item type: "runs tests" / "deploys" / neither - only
  *         when job or step names literally say so.
  * Confidence: Medium for the type hint (inferred from names), High for existence.
  */

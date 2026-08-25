@@ -4,7 +4,7 @@
  * Yields: one evidence per marker line. Captures an optional owner `TODO(alice):` and an
  *         optional priority `TODO(P1)` / `FIXME(high)` exactly as written. Continuation
  *         comment lines directly beneath are folded into the excerpt (max 3).
- * Confidence: High — the text is literal.
+ * Confidence: High - the text is literal.
  */
 import type { Extractor, RawEvidence } from '../model/types.js';
 import { classify } from '../scanner/classify.js';

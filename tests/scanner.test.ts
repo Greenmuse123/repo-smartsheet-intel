@@ -61,3 +61,14 @@ describe('scanRepository', () => {
     expect(inventory.languages).toEqual({ JavaScript: 1 });
   });
 });
+
+describe('CRLF handling', () => {
+  it('normalizes CRLF so line/regex parsing is OS-independent', () => {
+    const root = mkdtempSync(join(tmpdir(), 'rsi-crlf-'));
+    mkdirSync(join(root, 'src'));
+    writeFileSync(join(root, 'src', 'a.js'), ['function x() {', '  // TODO(sam): fix this', '  return 1;', '}', ''].join('\r\n'));
+    const { files } = scanRepository(root, { ignore: DEFAULT_IGNORE, maxFileSizeKb: 64 });
+    expect(files[0].content.includes('\r')).toBe(false);
+    expect(files[0].content).toContain('// TODO(sam): fix this');
+  });
+});

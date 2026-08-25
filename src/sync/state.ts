@@ -3,7 +3,7 @@
  *
  * What: remembers itemId → rowId + fingerprint + last-written status so later runs are fast.
  *       If the file is missing, the engine rebuilds everything it needs from the sheet's
- *       "Item ID", "Repo Fingerprint" and "Repo Status" columns — so a fresh clone still
+ *       "Item ID", "Repo Fingerprint" and "Repo Status" columns - so a fresh clone still
  *       produces zero duplicates.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';

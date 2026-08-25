@@ -76,7 +76,7 @@ describe('ci', () => {
 describe('adr + tests + codeowners', () => {
   it('reads ADR title and literal status', () => {
     const ev = adr.run(ctx([file('docs/adr/0001-x.md', '# ADR-1: Use X\n\nStatus: Accepted\n\n## Decision\n\nWe use X.\n')]));
-    expect(ev[0]).toMatchObject({ section: 'status=Accepted', excerpt: 'ADR-1: Use X — We use X.' });
+    expect(ev[0]).toMatchObject({ section: 'status=Accepted', excerpt: 'ADR-1: Use X - We use X.' });
   });
   it('groups test files by root', () => {
     const ev = testsExtractor.run(ctx([file('tests/a.test.js', ''), file('tests/b.test.js', ''), file('src/x.js', '')]));
@@ -91,7 +91,7 @@ describe('adr + tests + codeowners', () => {
 });
 
 describe('risk-heuristics', () => {
-  it('flags missing CI/tests, FIXME in auth paths, and missing lockfile — but nothing else', () => {
+  it('flags missing CI/tests, FIXME in auth paths, and missing lockfile - but nothing else', () => {
     const c = ctx([file('src/auth/login.js', '// FIXME: token check'), file('package.json', '{}')]);
     const kinds = riskHeuristics.run(c).map((e) => e.sourceType).sort();
     expect(kinds).toEqual(['Risk heuristic R1', 'Risk heuristic R2', 'Risk heuristic R3', 'Risk heuristic R4']);

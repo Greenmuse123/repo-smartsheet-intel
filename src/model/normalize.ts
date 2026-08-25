@@ -50,7 +50,7 @@ export function normalize(evidence: RawEvidence[], opts: NormalizeOptions = {}):
     const itemId = itemIdFor(ev);
     if (seen.has(itemId)) continue; // identical evidence twice (e.g. duplicated TODO text in one file)
     seen.add(itemId);
-    const sourceReference = `${ev.path}${ev.line ? `:${ev.line}` : ''} — ${ev.sourceType}${ev.refs?.length ? ` (refs ${ev.refs.join(', ')})` : ''}`;
+    const sourceReference = `${ev.path}${ev.line ? `:${ev.line}` : ''} - ${ev.sourceType}${ev.refs?.length ? ` (refs ${ev.refs.join(', ')})` : ''}`;
     const partial: Omit<ProjectItem, 'fingerprint'> = {
       itemId,
       component: componentOf(ev.path),
@@ -151,7 +151,7 @@ function build(ev: RawEvidence, opts: NormalizeOptions): Built | undefined {
       const st = meta.status?.toLowerCase();
       const status: Status = st === 'accepted' ? 'Done' : 'Unknown';
       return {
-        item: title(ev.excerpt.split(' — ')[0]),
+        item: title(ev.excerpt.split(' - ')[0]),
         type: 'Decision',
         description: `${ev.excerpt}${meta.status ? ` (ADR status: ${meta.status})` : ''}`,
         status,

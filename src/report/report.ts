@@ -16,12 +16,12 @@ export function renderReport(inv: RepoInventory, items: ProjectItem[], projectNa
   const readme = items.find((i) => i.evidence[0]?.sourceType === 'README summary');
 
   const lines: string[] = [];
-  lines.push(`# Repository Intelligence Report — ${projectName}`, '', `Generated ${generatedAt} from \`${inv.root}\`${inv.headCommit ? ` at commit \`${inv.headCommit}\`` : ' (no git history)'}.`, '');
+  lines.push(`# Repository Intelligence Report - ${projectName}`, '', `Generated ${generatedAt} from \`${inv.root}\`${inv.headCommit ? ` at commit \`${inv.headCommit}\`` : ' (no git history)'}.`, '');
   lines.push('## What this application appears to do', '');
   lines.push(readme ? `From the README (${readme.sourceReference}): "${readme.description}"` : 'No README summary was found. The purpose of the application cannot be stated from repository evidence.');
   lines.push('', `Languages (by source-file count): ${langs.length ? langs.map(([l, n]) => `${l} (${n})`).join(', ') : 'none detected'}.`);
   lines.push(`Frameworks detected from manifests: ${inv.frameworks.length ? inv.frameworks.join(', ') : 'none detected'}.`, '');
-  lines.push('## Important components', '', inv.topLevelDirs.length ? inv.topLevelDirs.map((d) => `- \`${d}/\` — ${items.filter((i) => i.component === d).length} tracked item(s)`).join('\n') : '- (flat repository, no top-level directories)', '');
+  lines.push('## Important components', '', inv.topLevelDirs.length ? inv.topLevelDirs.map((d) => `- \`${d}/\` - ${items.filter((i) => i.component === d).length} tracked item(s)`).join('\n') : '- (flat repository, no top-level directories)', '');
   lines.push('## Sources that contain project-management information', '', '| Source type | Files | Why it is useful |', '|---|---|---|');
   const why: Record<string, string> = {
     'README': 'states purpose; roadmap checklists become tasks',

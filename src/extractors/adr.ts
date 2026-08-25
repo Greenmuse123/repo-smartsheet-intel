@@ -26,7 +26,7 @@ export const adr: Extractor = {
         sourceType: 'Decision record (ADR)',
         line: 1,
         section: status ? `status=${status}` : undefined,
-        excerpt: `${title}${decision ? ` — ${decision}` : ''}`,
+        excerpt: `${title}${decision ? ` - ${decision}` : ''}`,
       }));
     }
     return out;

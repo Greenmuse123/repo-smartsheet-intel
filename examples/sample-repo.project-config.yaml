@@ -5,6 +5,6 @@ project:
 track:
   - everything
 smartsheet:
-  sheetName: Orderly — Repo Intelligence
+  sheetName: Orderly - Repo Intelligence
 output:
   dir: ../output/orderly

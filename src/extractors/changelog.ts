@@ -9,7 +9,7 @@ import type { Extractor, RawEvidence } from '../model/types.js';
 import { classify } from '../scanner/classify.js';
 import { evidence, markdownSections } from './util.js';
 
-const VERSION = /^\[?(v?\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?)\]?(?:\s*[-–—]\s*|\s*\(|\s+)?(\d{4}-\d{2}-\d{2})?/i;
+const VERSION = /^\[?(v?\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?)\]?(?:\s*-\s*|\s*\(|\s+)?(\d{4}-\d{2}-\d{2})?/i;
 
 export const changelog: Extractor = {
   id: 'changelog',

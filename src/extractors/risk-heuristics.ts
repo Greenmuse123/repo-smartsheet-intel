@@ -2,7 +2,7 @@
  * Extractor: risk heuristics.
  *
  * Yields: Risk *suggestions* only. Every rule cites the evidence it is based on and is
- *         normalized to Confidence=Low, Human Review=Yes, text in AI Suggestion — never as a fact.
+ *         normalized to Confidence=Low, Human Review=Yes, text in AI Suggestion - never as a fact.
  * Rules (all deterministic):
  *   R1 no CI config found            R2 no test files found
  *   R3 FIXME/BUG/HACK in a security-sensitive path (auth|login|payment|billing|crypto|secret)

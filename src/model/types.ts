@@ -1,7 +1,7 @@
 /**
  * Core data model.
  *
- * What: the three shapes every other module speaks — RawEvidence (what the repo literally says),
+ * What: the three shapes every other module speaks - RawEvidence (what the repo literally says),
  *       ProjectItem (the normalized fact), and SyncPlan (what we intend to do to the sheet).
  * Rule: evidence and interpretation are never merged. `ProjectItem.evidence` keeps the raw
  *       excerpts; `aiSuggestion` keeps anything inferred. See DESIGN.md §3.
@@ -86,7 +86,7 @@ export interface RepoInventory {
   hasGit: boolean;
   headCommit?: string;
   sources: Record<string, string[]>; // sourceType -> paths
-  /** every file path seen (including ignored ones) — lets heuristics check for lockfiles etc. */
+  /** every file path seen (including ignored ones) - lets heuristics check for lockfiles etc. */
   allPaths: string[];
 }
 

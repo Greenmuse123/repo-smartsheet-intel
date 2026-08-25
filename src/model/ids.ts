@@ -1,8 +1,8 @@
 /**
  * Stable item identity + fingerprints.
  *
- * What: `itemIdFor(evidence)` — deterministic ID from path + normalized text, so an item keeps
- *       its ID when its line number moves. `fingerprintOf(item)` — sha1 over repo-controlled
+ * What: `itemIdFor(evidence)` - deterministic ID from path + normalized text, so an item keeps
+ *       its ID when its line number moves. `fingerprintOf(item)` - sha1 over repo-controlled
  *       fields, used to detect real changes.
  */
 import { createHash } from 'node:crypto';

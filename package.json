@@ -13,6 +13,7 @@
     "rsi": "tsx src/cli/index.ts",
     "demo:report": "tsx src/cli/index.ts report --config examples/sample-repo.project-config.yaml",
     "demo:dry-run": "tsx src/cli/index.ts sync --dry-run --config examples/sample-repo.project-config.yaml",
+    "demo:walkthrough": "tsx src/cli/index.ts demo --config examples/sample-repo.project-config.yaml",
     "demo:csv": "tsx src/cli/index.ts export-csv --config examples/sample-repo.project-config.yaml"
   },
   "dependencies": {

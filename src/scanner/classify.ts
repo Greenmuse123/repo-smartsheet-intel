@@ -1,7 +1,7 @@
 /**
  * File classification.
  *
- * What: cheap, deterministic labels for a path — language, whether it is a manifest,
+ * What: cheap, deterministic labels for a path - language, whether it is a manifest,
  *       CI config, test, README, changelog, ADR, CODEOWNERS.
  * Use:  `classify('src/a.test.ts') → { language: 'TypeScript', isTest: true, ... }`.
  * Depends on: nothing.

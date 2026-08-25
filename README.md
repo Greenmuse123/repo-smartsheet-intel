@@ -14,7 +14,7 @@ Repository → Scanner → Extractors → Normalized Project Model → Validatio
 
 ---
 
-# How This Works — Super Simple Version
+# How This Works - Super Simple Version
 
 Imagine your software project is a giant toy box.
 
@@ -158,7 +158,7 @@ scan:
   perPackageDependencies: false    # true = one row per declared dependency
 track: [everything]                # or a list of extractor ids
 smartsheet:
-  sheetName: Orderly — Repo Intelligence
+  sheetName: Orderly - Repo Intelligence
   sheetIdEnv: SMARTSHEET_SHEET_ID  # env var names, never values
   tokenEnv: SMARTSHEET_ACCESS_TOKEN
   batchSize: 400
@@ -196,7 +196,7 @@ ANTHROPIC_API_KEY=         # only if ai.enabled
 | manifests | package.json, pyproject, requirements, go.mod, Cargo.toml, composer.json | Dependency | Unknown | High (Medium if unparseable → review) |
 | ci | workflow files; job names; literal `npm test`/`pytest`/`deploy` commands | Test / Release / Unknown | Unknown | Medium (Low if Unknown → review) |
 | tests | test roots with file counts (never executed) | Test | Unknown | High |
-| codeowners | rules; last match wins | — (seeds Owner) | — | High |
+| codeowners | rules; last match wins | - (seeds Owner) | - | High |
 | adr | `docs/adr/*.md`, `ADR-*.md`; `Status:` line | Decision | Done if Accepted, else Unknown | High |
 | risk-heuristics | R1 no CI · R2 no tests · R3 FIXME/HACK in auth/payment paths · R4 manifest without lockfile | Risk | Unknown | Low → AI Suggestion + Human Review |
 
@@ -234,7 +234,7 @@ Rows are never deleted. Vanished items → `Missing in Repo` + Human Review, fla
 
 ## Testing
 
-`npm test` — `tests/extractors`, `normalize` (no fabrication, stable IDs, redaction, e2e fixture), `scanner` (ignore, sensitive files, redaction, read-only walk), `sync` (idempotency, state loss, correct-row update, protected fields, conflict, missing, dry-run), `client` (empty/invalid token, 429 backoff, Retry-After, exhaustion, batching, schema), `csv-config`.
+`npm test` - `tests/extractors`, `normalize` (no fabrication, stable IDs, redaction, e2e fixture), `scanner` (ignore, sensitive files, redaction, read-only walk), `sync` (idempotency, state loss, correct-row update, protected fields, conflict, missing, dry-run), `client` (empty/invalid token, 429 backoff, Retry-After, exhaustion, batching, schema), `csv-config`.
 
 ## Commands
 
@@ -270,11 +270,11 @@ All commands accept `-c <config>` and `-v`.
 
 # Three-Level Explanation
 
-## Level 1 — to a 5-year-old
+## Level 1 - to a 5-year-old
 
 The computer reads the sticky notes inside the toy box, copies them neatly onto a big chart, and asks a grown-up whenever it is not sure. It never throws a note away and never makes one up.
 
-## Level 2 — to a project manager
+## Level 2 - to a project manager
 
 - **Time saved:** no more hunting through READMEs, changelogs and code comments; one command produces the sheet and keeps it current.
 - **Visibility:** every open TODO, bug, release, decision and test suite in one filterable view with Type, Status, Component and Owner (when the code states it).
@@ -283,7 +283,7 @@ The computer reads the sticky notes inside the toy box, copies them neatly onto 
 - **Traceability:** every row has a Source (`file:line`) and a Confidence, so you can verify in seconds.
 - **Human review:** suggestions, conflicts and vanished items are flagged for a person, never silently decided.
 
-## Level 3 — to an engineer
+## Level 3 - to an engineer
 
 - **Architecture:** scanner → pure extractors → normalizer → validator → optional LLM → pure planner → batched adapter. Each unit is independently testable; extractors operate on an in-memory file list.
 - **Parsing:** regex/line parsers for comments, markdown sections, Keep-a-Changelog headings, JSON/TOML/requirements manifests, YAML job names, CODEOWNERS (last match wins). No LLM in the parse path.

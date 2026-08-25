@@ -3,7 +3,7 @@
  *
  * What: loads + validates the per-project config so the same code runs on any repository.
  * Use:  `loadConfig(path)` → `ProjectConfig`; `defaultConfig()` for the wizard.
- * Depends on: yaml. No secrets live here — tokens come from environment variables only.
+ * Depends on: yaml. No secrets live here - tokens come from environment variables only.
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
@@ -64,7 +64,7 @@ export function defaultConfig(overrides: Partial<ProjectConfig> = {}): ProjectCo
     project: { name: 'My Project', repository: '.' },
     scan: { include: ['**/*'], ignore: [...DEFAULT_IGNORE], maxFileSizeKb: 512, perPackageDependencies: false },
     track: ['everything'],
-    smartsheet: { sheetName: 'My Project — Repo Intelligence', sheetIdEnv: 'SMARTSHEET_SHEET_ID', tokenEnv: 'SMARTSHEET_ACCESS_TOKEN', batchSize: 400 },
+    smartsheet: { sheetName: 'My Project - Repo Intelligence', sheetIdEnv: 'SMARTSHEET_SHEET_ID', tokenEnv: 'SMARTSHEET_ACCESS_TOKEN', batchSize: 400 },
     sync: {
       stateDir: '.repo-smartsheet',
       humanControlled: ['Priority', 'Owner', 'Dependency', 'Milestone', 'Due Date', 'Management Notes'],

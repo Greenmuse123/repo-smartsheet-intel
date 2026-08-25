@@ -1,0 +1,567 @@
+<title>Repo to Smartsheet Intelligence</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,900&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --paper: #f3f1ea;
+    --paper-2: #eae6db;
+    --card: #fbfaf6;
+    --ink: #182338;
+    --ink-2: #3f4a63;
+    --ink-3: #6b7488;
+    --line: #d9d3c4;
+    --line-2: #c9c2b0;
+    --accent: #b9761a;
+    --accent-soft: #f0e2cc;
+    --navy: #1d2b49;
+    --good: #2f7d5b;
+    --good-bg: #dcecdf;
+    --warn: #a6701a;
+    --warn-bg: #f2e6c9;
+    --crit: #a53b2f;
+    --crit-bg: #f1dcd6;
+    --info: #35618e;
+    --info-bg: #d9e5f0;
+    --shadow: 0 1px 2px rgba(24,35,56,.06), 0 8px 24px rgba(24,35,56,.06);
+    --maxw: 1080px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #10151f;
+      --paper-2: #161d2b;
+      --card: #182131;
+      --ink: #eef1f6;
+      --ink-2: #b9c1d1;
+      --ink-3: #838da0;
+      --line: #2a3548;
+      --line-2: #384662;
+      --accent: #e0a34e;
+      --accent-soft: #33291a;
+      --navy: #c7d4ea;
+      --good: #6dc79a;
+      --good-bg: #16281f;
+      --warn: #e0b054;
+      --warn-bg: #2c2413;
+      --crit: #e58b7c;
+      --crit-bg: #2c1a17;
+      --info: #82afdc;
+      --info-bg: #16222f;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #10151f;
+    --paper-2: #161d2b;
+    --card: #182131;
+    --ink: #eef1f6;
+    --ink-2: #b9c1d1;
+    --ink-3: #838da0;
+    --line: #2a3548;
+    --line-2: #384662;
+    --accent: #e0a34e;
+    --accent-soft: #33291a;
+    --navy: #c7d4ea;
+    --good: #6dc79a;
+    --good-bg: #16281f;
+    --warn: #e0b054;
+    --warn-bg: #2c2413;
+    --crit: #e58b7c;
+    --crit-bg: #2c1a17;
+    --info: #82afdc;
+    --info-bg: #16222f;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    font-size: 17px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+  section { padding: 68px 0; border-top: 1px solid var(--line); }
+  h1, h2, h3 { font-family: "Fraunces", Georgia, serif; text-wrap: balance; line-height: 1.08; margin: 0; letter-spacing: -.01em; }
+  p { margin: 0 0 1em; max-width: 66ch; }
+  a { color: var(--accent); }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 18px;
+  }
+  .lede { font-size: 20px; color: var(--ink-2); max-width: 60ch; }
+
+  /* ---- hero ---- */
+  header.hero { background: var(--paper); border-top: none; position: relative; overflow: hidden; }
+  .hero-inner { padding: 96px 0 72px; position: relative; z-index: 1; }
+  .kicker { display:flex; align-items:center; gap: 12px; margin-bottom: 26px; flex-wrap: wrap; }
+  .kicker .tag {
+    font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-2); border: 1px solid var(--line-2); border-radius: 999px; padding: 5px 12px; background: var(--card);
+  }
+  .hero h1 { font-size: clamp(40px, 6.4vw, 76px); font-weight: 600; font-optical-sizing: auto; }
+  .hero h1 .hl { color: var(--accent); font-style: italic; }
+  .hero .lede { font-size: clamp(18px, 2.2vw, 23px); margin-top: 26px; }
+  .flow {
+    font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--ink-2);
+    margin-top: 32px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  }
+  .flow b { color: var(--ink); font-weight: 600; }
+  .flow .ar { color: var(--accent); }
+  .promises { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 48px; }
+  .promise { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px; box-shadow: var(--shadow); }
+  .promise .n { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--accent); letter-spacing: .1em; }
+  .promise h3 { font-size: 20px; margin: 8px 0 8px; font-weight: 600; }
+  .promise p { font-size: 15px; color: var(--ink-2); margin: 0; }
+  @media (max-width: 720px) { .promises { grid-template-columns: 1fr; } }
+
+  /* stat strip */
+  .stats { display: flex; flex-wrap: wrap; gap: 34px; margin-top: 52px; padding-top: 30px; border-top: 1px dashed var(--line-2); }
+  .stat .v { font-family: "Fraunces", serif; font-size: 40px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .stat .l { font-family: "IBM Plex Mono", monospace; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); margin-top: 2px; }
+
+  h2.sec { font-size: clamp(28px, 4vw, 40px); font-weight: 600; }
+  .sub { color: var(--ink-2); max-width: 62ch; margin-top: 14px; }
+
+  /* two-column compare */
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 36px; }
+  @media (max-width: 760px) { .compare { grid-template-columns: 1fr; } }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 24px; box-shadow: var(--shadow); }
+  .panel.reads { border-top: 3px solid var(--good); }
+  .panel.refuses { border-top: 3px solid var(--accent); }
+  .panel h3 { font-size: 19px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+  .panel h3 .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .panel ul { list-style: none; padding: 0; margin: 16px 0 0; }
+  .panel li { display: flex; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 15px; color: var(--ink-2); }
+  .panel li:first-child { border-top: none; }
+  .panel li .mk { flex: none; color: var(--accent); font-family: "IBM Plex Mono", monospace; }
+  .panel.reads li .mk { color: var(--good); }
+
+  /* pipeline */
+  .pipe { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 36px; }
+  @media (max-width: 860px) { .pipe { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 480px) { .pipe { grid-template-columns: 1fr; } }
+  .stage { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; position: relative; }
+  .stage .s-n { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--accent); letter-spacing: .12em; }
+  .stage h4 { margin: 6px 0 6px; font-size: 16px; font-family: "IBM Plex Sans", sans-serif; font-weight: 600; }
+  .stage p { font-size: 13.5px; color: var(--ink-3); margin: 0; }
+
+  /* sheet mock */
+  .sheet-wrap { margin-top: 32px; border: 1px solid var(--line-2); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); background: var(--card); }
+  .sheet-bar { background: var(--navy); color: var(--paper); padding: 12px 18px; font-family: "IBM Plex Mono", monospace; font-size: 12.5px; letter-spacing: .04em; display: flex; align-items: center; gap: 10px; }
+  :root[data-theme="dark"] .sheet-bar, :root:not([data-theme="light"]) .sheet-bar { color: var(--paper); }
+  .sheet-bar .glyph { width: 14px; height: 14px; background: var(--accent); border-radius: 3px; flex: none; }
+  .scroll { overflow-x: auto; }
+  table.sheet { border-collapse: collapse; width: 100%; min-width: 860px; font-size: 13.5px; }
+  table.sheet th { background: var(--paper-2); text-align: left; padding: 10px 14px; font-family: "IBM Plex Mono", monospace; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); border-bottom: 1px solid var(--line-2); white-space: nowrap; font-weight: 600; }
+  table.sheet td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--ink-2); }
+  table.sheet tr:last-child td { border-bottom: none; }
+  table.sheet .id { font-family: "IBM Plex Mono", monospace; color: var(--ink-3); font-size: 12px; white-space: nowrap; }
+  table.sheet .item { color: var(--ink); font-weight: 500; min-width: 220px; }
+  table.sheet .src { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+  .pill { display: inline-block; font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; white-space: nowrap; letter-spacing: .02em; }
+  .p-type { background: var(--paper-2); color: var(--ink-2); border: 1px solid var(--line-2); }
+  .p-good { background: var(--good-bg); color: var(--good); }
+  .p-warn { background: var(--warn-bg); color: var(--warn); }
+  .p-crit { background: var(--crit-bg); color: var(--crit); }
+  .p-info { background: var(--info-bg); color: var(--info); }
+  .blank { font-family: "IBM Plex Mono", monospace; color: var(--ink-3); font-style: italic; font-size: 12px; opacity: .8; }
+  .chk { color: var(--accent); font-weight: 700; }
+  .caption { font-size: 13.5px; color: var(--ink-3); margin-top: 14px; font-family: "IBM Plex Mono", monospace; }
+
+  /* ownership model */
+  .own { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 34px; }
+  @media (max-width: 760px) { .own { grid-template-columns: 1fr; } }
+  .own .c { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px; box-shadow: var(--shadow); }
+  .own .c .lab { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
+  .own .c h4 { margin: 8px 0 10px; font-size: 18px; font-family: "Fraunces", serif; font-weight: 600; }
+  .own .c p { font-size: 14px; color: var(--ink-2); margin: 0 0 10px; }
+  .own .c .cols { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-3); line-height: 1.7; }
+
+  /* demo timeline */
+  .steps { margin-top: 36px; display: grid; gap: 0; }
+  .step { display: grid; grid-template-columns: 52px 1fr; gap: 20px; padding: 22px 0; border-top: 1px solid var(--line); }
+  .step:first-child { border-top: none; }
+  .step .num { font-family: "Fraunces", serif; font-size: 30px; font-weight: 600; color: var(--accent); line-height: 1; font-variant-numeric: tabular-nums; }
+  .step h4 { font-size: 18px; font-weight: 600; margin: 0 0 6px; font-family: "IBM Plex Sans", sans-serif; }
+  .step p { font-size: 15px; color: var(--ink-2); margin: 0 0 10px; }
+  .step .out {
+    font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--ink-2);
+    background: var(--paper-2); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 10px 14px; white-space: pre-wrap; overflow-x: auto;
+  }
+  .step .out .g { color: var(--good); }
+  .step .out .c { color: var(--crit); }
+  .step .out .w { color: var(--warn); }
+
+  /* status / next */
+  .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 34px; }
+  @media (max-width: 760px) { .cols2 { grid-template-columns: 1fr; } }
+  .list { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 24px; box-shadow: var(--shadow); }
+  .list h3 { font-size: 18px; font-weight: 600; margin: 0 0 14px; font-family: "IBM Plex Sans", sans-serif; display: flex; align-items: center; gap: 9px; }
+  .list ul { list-style: none; margin: 0; padding: 0; }
+  .list li { padding: 8px 0 8px 26px; position: relative; font-size: 14.5px; color: var(--ink-2); border-top: 1px solid var(--line); }
+  .list li:first-child { border-top: none; }
+  .list.done li::before { content: "✓"; position: absolute; left: 0; color: var(--good); font-weight: 700; }
+  .list.next li::before { content: "→"; position: absolute; left: 0; color: var(--accent); font-weight: 700; }
+
+  /* run box */
+  .run { margin-top: 34px; background: var(--navy); border-radius: 14px; padding: 28px; color: var(--paper); box-shadow: var(--shadow); }
+  :root[data-theme="dark"] .run, :root:not([data-theme="light"]) .run { border: 1px solid var(--line-2); }
+  .run h3 { color: var(--paper); font-family: "IBM Plex Sans", sans-serif; font-size: 18px; margin: 0 0 16px; font-weight: 600; }
+  .run pre { font-family: "IBM Plex Mono", monospace; font-size: 13px; margin: 0; overflow-x: auto; line-height: 1.9; color: #d7ddea; }
+  .run pre .cm { color: #8f9cb5; }
+  .run pre .ac { color: var(--accent); }
+  :root:not([data-theme="light"]) .run pre .ac, :root[data-theme="dark"] .run pre .ac { color: #e6ac57; }
+
+  footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--ink-3); font-size: 13.5px; font-family: "IBM Plex Mono", monospace; }
+  footer .fl { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+  .toggle { position: fixed; top: 16px; right: 16px; z-index: 20; background: var(--card); border: 1px solid var(--line-2); color: var(--ink-2); border-radius: 999px; padding: 7px 14px; font-family: "IBM Plex Mono", monospace; font-size: 12px; cursor: pointer; box-shadow: var(--shadow); }
+  .toggle:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+</style>
+
+<button class="toggle" id="tg" aria-label="Toggle light or dark theme">theme</button>
+
+<header class="hero">
+  <div class="wrap hero-inner">
+    <div class="kicker">
+      <span class="tag">Engineering demo</span>
+      <span class="tag">Repository &rarr; Smartsheet</span>
+      <span class="tag">48 tests green</span>
+    </div>
+    <h1>Your repo already wrote the status report. <span class="hl">It just never told the PM.</span></h1>
+    <p class="lede">A command-line tool that reads an existing codebase, turns the project information already hiding inside it into clean Smartsheet rows, and keeps them current, without inventing a single fact.</p>
+    <div class="flow">
+      <b>Repository</b> <span class="ar">&rarr;</span> Scan <span class="ar">&rarr;</span> Extract <span class="ar">&rarr;</span> Normalize <span class="ar">&rarr;</span> Validate <span class="ar">&rarr;</span> Sync <span class="ar">&rarr;</span> <b>Smartsheet</b>
+    </div>
+
+    <div class="promises">
+      <div class="promise">
+        <div class="n">PROMISE 01</div>
+        <h3>Never invents a fact</h3>
+        <p>Owners, priorities and dates are filled only when the code literally states them. Everything else stays blank on purpose. A guard refuses to sync fabricated data.</p>
+      </div>
+      <div class="promise">
+        <div class="n">PROMISE 02</div>
+        <h3>Every row is traceable</h3>
+        <p>Each row carries the exact <span class="mono">file:line</span> and evidence type it came from, plus a confidence level, so a human can verify it in seconds.</p>
+      </div>
+      <div class="promise">
+        <div class="n">PROMISE 03</div>
+        <h3>Protects human work</h3>
+        <p>When a person edits the sheet, the tool never overwrites their decision. Disagreements become a flagged conflict, not a silent stomp. Nothing is ever deleted.</p>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="v">23</div><div class="l">items found in the demo repo</div></div>
+      <div class="stat"><div class="v">9</div><div class="l">evidence extractors</div></div>
+      <div class="stat"><div class="v">48</div><div class="l">automated tests passing</div></div>
+      <div class="stat"><div class="v">0</div><div class="l">rows deleted, ever</div></div>
+    </div>
+  </div>
+</header>
+
+<section id="problem">
+  <div class="wrap">
+    <p class="eyebrow">The problem</p>
+    <h2 class="sec">The information exists. Nobody has time to go get it.</h2>
+    <p class="sub">A software project already records what is happening, in a dozen scattered places: TODO and FIXME comments, README roadmaps, changelogs, CI files, package manifests, ownership files, decision records. A project manager should not have to open twelve files to answer one question. This tool reads all of them and puts organized copies into one sheet, so the sheet stays honest with almost no manual upkeep.</p>
+  </div>
+</section>
+
+<section id="showcase">
+  <div class="wrap">
+    <p class="eyebrow">The core discipline</p>
+    <h2 class="sec">What it reads &mdash; and what it refuses to guess.</h2>
+    <p class="sub">Accuracy beats a full sheet. These two lists are the heart of the design: the tool is generous with evidence and strict about invention. The right column is what makes it safe to trust.</p>
+    <div class="compare">
+      <div class="panel reads">
+        <h3><span class="dot" style="background:var(--good)"></span>Reads as fact (with evidence)</h3>
+        <ul>
+          <li><span class="mk">&check;</span><span>Open work from <b>TODO / FIXME / HACK</b> comments, in the developer's own words</span></li>
+          <li><span class="mk">&check;</span><span>Done vs not-done from <b>README checklists</b></span></li>
+          <li><span class="mk">&check;</span><span>Versions and dates from the <b>changelog</b></span></li>
+          <li><span class="mk">&check;</span><span>Owner, but only from <b>CODEOWNERS</b> or a literal <span class="mono">TODO(name)</span></span></li>
+          <li><span class="mk">&check;</span><span>Priority, but only from a literal tag like <span class="mono">TODO(P1)</span></span></li>
+          <li><span class="mk">&check;</span><span>Decisions from <b>ADRs</b>, dependencies from <b>manifests</b>, suites from <b>tests</b></span></li>
+        </ul>
+      </div>
+      <div class="panel refuses">
+        <h3><span class="dot" style="background:var(--accent)"></span>Refuses to invent</h3>
+        <ul>
+          <li><span class="mk">&times;</span><span><b>Due dates</b> &mdash; no repository states them. Always left blank.</span></li>
+          <li><span class="mk">&times;</span><span><b>Business priority</b> when the code is silent (22 of 23 demo rows left blank)</span></li>
+          <li><span class="mk">&times;</span><span><b>An owner</b> the code never named (7 of 23 rows left blank)</span></li>
+          <li><span class="mk">&times;</span><span><b>Completion percentages</b> and made-up status</span></li>
+          <li><span class="mk">&times;</span><span><b>Whether tests pass</b> &mdash; the tool never executes the target's code</span></li>
+          <li><span class="mk">&times;</span><span>Guesses go to an <b>AI Suggestion</b> column with a Human Review flag &mdash; never into a fact column</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="sheet">
+  <div class="wrap">
+    <p class="eyebrow">Real output</p>
+    <h2 class="sec">Actual rows from the demo repository.</h2>
+    <p class="sub">This is genuine output from &ldquo;Orderly&rdquo;, a small bakery order-tracking API bundled with the tool. Note the blanks the tool chose to leave, the monospace <span class="mono">file:line</span> source on every row, and the low-confidence risk routed to Human Review.</p>
+    <div class="sheet-wrap">
+      <div class="sheet-bar"><span class="glyph"></span> Orderly &mdash; Repo Intelligence &nbsp;&middot;&nbsp; 23 rows &nbsp;&middot;&nbsp; 3 need review</div>
+      <div class="scroll">
+        <table class="sheet">
+          <thead>
+            <tr>
+              <th>Item ID</th><th>Item</th><th>Type</th><th>Status</th><th>Priority</th><th>Owner</th><th>Confidence</th><th>Review</th><th>Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="id">RSI-TD-594c25cb</td>
+              <td class="item">sessions never expire; add a TTL and a cleanup job</td>
+              <td><span class="pill p-crit">Bug</span></td>
+              <td><span class="pill p-type">Not Started</span></td>
+              <td><span class="blank">blank</span></td>
+              <td>@maria, @dev-lee</td>
+              <td><span class="pill p-good">High</span></td>
+              <td></td>
+              <td class="src">src/auth/session.js:5</td>
+            </tr>
+            <tr>
+              <td class="id">RSI-TD-2e07fd31</td>
+              <td class="item">daily summary report for the owner</td>
+              <td><span class="pill p-type">Task</span></td>
+              <td><span class="pill p-type">Not Started</span></td>
+              <td><span class="pill p-crit">High</span></td>
+              <td>@maria</td>
+              <td><span class="pill p-good">High</span></td>
+              <td></td>
+              <td class="src">src/orders/service.js:22</td>
+            </tr>
+            <tr>
+              <td class="id">RSI-CK-dad057ed</td>
+              <td class="item">Email the customer when an order is ready (#42)</td>
+              <td><span class="pill p-type">Task</span></td>
+              <td><span class="pill p-type">Not Started</span></td>
+              <td><span class="blank">blank</span></td>
+              <td>@maria</td>
+              <td><span class="pill p-good">High</span></td>
+              <td></td>
+              <td class="src">README.md:16</td>
+            </tr>
+            <tr>
+              <td class="id">RSI-RL-2a64fb83</td>
+              <td class="item">Release 1.2.0</td>
+              <td><span class="pill p-info">Release</span></td>
+              <td><span class="pill p-good">Released</span></td>
+              <td><span class="blank">blank</span></td>
+              <td><span class="blank">blank</span></td>
+              <td><span class="pill p-good">High</span></td>
+              <td></td>
+              <td class="src">CHANGELOG.md:10</td>
+            </tr>
+            <tr>
+              <td class="id">RSI-AD-b9cd6e10</td>
+              <td class="item">ADR-0001: Use PostgreSQL for order storage</td>
+              <td><span class="pill p-info">Decision</span></td>
+              <td><span class="pill p-good">Done</span></td>
+              <td><span class="blank">blank</span></td>
+              <td>@maria</td>
+              <td><span class="pill p-good">High</span></td>
+              <td></td>
+              <td class="src">docs/adr/0001-use-postgres.md</td>
+            </tr>
+            <tr>
+              <td class="id">RSI-RK-01c48a24</td>
+              <td class="item">Possible risk: HACK in a security-sensitive file (ORD-17)</td>
+              <td><span class="pill p-warn">Risk</span></td>
+              <td><span class="pill p-type">Unknown</span></td>
+              <td><span class="blank">blank</span></td>
+              <td><span class="blank">blank</span></td>
+              <td><span class="pill p-warn">Low</span></td>
+              <td><span class="chk">&check;</span></td>
+              <td class="src">src/payments/stripe.js:4</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <p class="caption">6 of 23 rows shown. Full sheet has 22 columns; the technical ones hide behind the main view.</p>
+  </div>
+</section>
+
+<section id="pipeline">
+  <div class="wrap">
+    <p class="eyebrow">How it works</p>
+    <h2 class="sec">Deterministic code does the reading. The optional AI only ever suggests.</h2>
+    <p class="sub">Nine small, independently tested extractors do the parsing &mdash; no language model in the path that produces facts. An optional Claude pass (off by default) writes plain-language summaries into the AI Suggestion column and nothing else.</p>
+    <div class="pipe">
+      <div class="stage"><div class="s-n">STAGE 01</div><h4>Scan</h4><p>Walk the repo read-only. Skip vendor dirs and binaries. Withhold anything that looks like a secret before any other rule.</p></div>
+      <div class="stage"><div class="s-n">STAGE 02</div><h4>Extract</h4><p>Nine parsers turn comments, checklists, changelogs, manifests, CI, tests, CODEOWNERS and ADRs into verbatim evidence.</p></div>
+      <div class="stage"><div class="s-n">STAGE 03</div><h4>Normalize + validate</h4><p>Evidence becomes rows with a stable ID and a confidence level. A guard rejects any invented owner, priority or date.</p></div>
+      <div class="stage"><div class="s-n">STAGE 04</div><h4>Sync</h4><p>A three-way merge creates, updates or flags rows in Smartsheet. Idempotent, batched, retry-aware. Or export a CSV.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="ownership">
+  <div class="wrap">
+    <p class="eyebrow">The hard part, solved</p>
+    <h2 class="sec">What happens when the AI and a human both edit the same row?</h2>
+    <p class="sub">This is the question that sinks most sync tools. The answer is an explicit ownership model: every column belongs to the repository, to the human, or to both under a defined conflict rule.</p>
+    <div class="own">
+      <div class="c">
+        <div class="lab">Repository owns</div>
+        <h4>Refreshed from code</h4>
+        <p>Facts the repository is the source of truth for. Overwritten whenever the code changes.</p>
+        <div class="cols">Item &middot; Type &middot; Component<br>Description &middot; Source<br>Confidence &middot; Last Repo Update</div>
+      </div>
+      <div class="c">
+        <div class="lab">Human owns</div>
+        <h4>Never overwritten</h4>
+        <p>PM decisions. Seeded once on creation only if the code proves them, then left alone forever.</p>
+        <div class="cols">Priority &middot; Owner<br>Due Date &middot; Milestone<br>Management Notes</div>
+      </div>
+      <div class="c">
+        <div class="lab">Shared &rarr; merged</div>
+        <h4>Conflict, not stomp</h4>
+        <p>If both sides change Status and disagree, the human value stays, the code's value moves to Repo Status, and the row is flagged.</p>
+        <div class="cols">Status<br>Human Review</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="demo">
+  <div class="wrap">
+    <p class="eyebrow">Run it twice</p>
+    <h2 class="sec">The five-step demo, verified end to end.</h2>
+    <p class="sub">Every line below is real output from <span class="mono">rsi demo</span>, which runs the true analyzer and sync engine against an in-memory sheet, so it needs no account and sends nothing anywhere. This is the sequence to walk through live.</p>
+    <div class="steps">
+      <div class="step">
+        <div class="num">1</div>
+        <div>
+          <h4>First sync</h4>
+          <p>An empty sheet. Every item found in the repository becomes a row.</p>
+          <div class="out">23 new items will be created.
+3 items require human review.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="num">2</div>
+        <div>
+          <h4>Run it again, nothing changed</h4>
+          <p>Idempotent: the second run makes no duplicates and writes nothing.</p>
+          <div class="out">0 new items &middot; 0 updated &middot; <span class="g">23 unchanged</span></div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="num">3</div>
+        <div>
+          <h4>A developer ticks a README checkbox</h4>
+          <p>The same row is updated, matched by its stable Item ID. No duplicate row appears.</p>
+          <div class="out">1 item will be updated.
+<span class="w">UPDATE</span> RSI-CK-dad057ed  Email the customer&hellip;  (status Not Started &rarr; Done)</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="num">4</div>
+        <div>
+          <h4>A PM sets it to Blocked; the developer reverts the code</h4>
+          <p>Both sides changed Status and now disagree. The human's value is kept; the code's value is preserved separately; the row is flagged.</p>
+          <div class="out"><span class="c">CONFLICT</span> RSI-CK-dad057ed  (sheet says "Blocked", repo says "Not Started")
+Status=Blocked &middot; Repo Status=Not Started &middot; Human Review=checked</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="num">5</div>
+        <div>
+          <h4>The FIXME comment is deleted from the code</h4>
+          <p>The tool cannot know if it was fixed or just removed, so it keeps the row and asks a human. Nothing is deleted.</p>
+          <div class="out">2 rows no longer found in the repository (kept, flagged).
+<span class="c">MISSING</span> RSI-TD-594c25cb  sessions never expire&hellip;
+Final sheet: 23 rows, 0 deleted.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="status">
+  <div class="wrap">
+    <p class="eyebrow">Honest status</p>
+    <h2 class="sec">Built and verified &mdash; and what is left.</h2>
+    <p class="sub">The tool is complete and tested. One thing is deliberately not claimed as done: the live write against a real Smartsheet account, which needs an API token this build did not have.</p>
+    <div class="cols2">
+      <div class="list done">
+        <h3><span class="dot" style="width:9px;height:9px;border-radius:50%;background:var(--good);display:inline-block"></span>Done and verified</h3>
+        <ul>
+          <li>9 extractors, normalizer, no-fabrication guard</li>
+          <li>Idempotent three-way sync with conflict handling</li>
+          <li>Smartsheet REST client: retry, backoff, 429 handling, batching</li>
+          <li>CSV fallback for teams without API access</li>
+          <li>Dry-run mode that writes nothing</li>
+          <li>Secret filtering and read-only guarantee</li>
+          <li>48 automated tests passing; typecheck clean</li>
+          <li>ELI5 guide, technical docs, data mapping, demo script</li>
+        </ul>
+      </div>
+      <div class="list next">
+        <h3><span class="dot" style="width:9px;height:9px;border-radius:50%;background:var(--accent);display:inline-block"></span>Next, with your account</h3>
+        <ul>
+          <li>First live run: <span class="mono">setup-sheet</span> then <span class="mono">sync --dry-run</span></li>
+          <li>Built to the verified API docs and tested against a mock transport &mdash; the live call is one token away</li>
+          <li>Point it at one of your real repositories</li>
+          <li>Optional: turn on the Claude summary pass</li>
+          <li>Future: scheduled or webhook-triggered incremental sync</li>
+        </ul>
+      </div>
+    </div>
+    <div class="run">
+      <h3>Try it in three commands</h3>
+      <pre><span class="cm"># from the app/ folder</span>
+npm install
+npm test                 <span class="cm"># 48 passing</span>
+npx rsi <span class="ac">demo</span>            <span class="cm"># the full storyline, no account needed</span>
+
+<span class="cm"># when you have a Smartsheet token in .env:</span>
+npx rsi <span class="ac">setup-sheet</span>     <span class="cm"># create the sheet with all columns</span>
+npx rsi <span class="ac">sync --dry-run</span>  <span class="cm"># preview every change, write nothing</span>
+npx rsi <span class="ac">sync</span></pre>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap fl">
+    <span>Repo &rarr; Smartsheet Project Intelligence</span>
+    <span>TypeScript &middot; Node &middot; 48 tests &middot; built for the Smartsheet workflow</span>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var b = document.getElementById('tg');
+    function cur() {
+      var s = document.documentElement.getAttribute('data-theme');
+      if (s) return s;
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    b.addEventListener('click', function () {
+      var next = cur() === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('rsi-theme', next); } catch (e) {}
+    });
+    try { var saved = localStorage.getItem('rsi-theme'); if (saved) document.documentElement.setAttribute('data-theme', saved); } catch (e) {}
+  })();
+</script>

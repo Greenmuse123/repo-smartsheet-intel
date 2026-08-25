@@ -1,5 +1,5 @@
 /**
- * SheetTarget — the narrow interface the sync engine needs from "a sheet".
+ * SheetTarget - the narrow interface the sync engine needs from "a sheet".
  *
  * What: read the sheet as rows keyed by column title; add rows; update rows.
  * Implementations: SmartsheetTarget (real), MemoryTarget (tests + dry-run safety proof).

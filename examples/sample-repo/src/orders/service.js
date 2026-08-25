@@ -19,5 +19,5 @@ function markBaked(number) {
   return o;
 }
 
-// TODO(P1): daily summary report for the owner — group by status and total revenue
+// TODO(P1): daily summary report for the owner - group by status and total revenue
 module.exports = { create, list, markBaked };

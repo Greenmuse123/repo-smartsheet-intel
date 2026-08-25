@@ -1,5 +1,5 @@
 /**
- * SmartsheetTarget — SheetTarget over the REST client. Translates column titles ↔ ids and
+ * SmartsheetTarget - SheetTarget over the REST client. Translates column titles ↔ ids and
  * drops values for columns that do not exist in the sheet (logged once).
  */
 import type { SheetTarget, TargetRow, CellValues } from '../../sync/target.js';
@@ -41,7 +41,7 @@ export class SmartsheetTarget implements SheetTarget {
         if (!this.warnedMissing.has(title)) { this.warnedMissing.add(title); log.warn(`Sheet has no "${title}" column; that value will not be written. Run \`rsi setup-sheet\` to create a sheet with the full schema.`); }
         continue;
       }
-      if (v === null || v === undefined) continue; // Smartsheet clears cells with value "" — we never blank a cell implicitly
+      if (v === null || v === undefined) continue; // Smartsheet clears cells with value "" - we never blank a cell implicitly
       out.push({ columnId: id, value: v });
     }
     return out;

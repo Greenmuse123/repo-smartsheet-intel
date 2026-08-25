@@ -5,7 +5,7 @@
  *       nature. (2) `redact(text)` scrubs token-shaped strings from any excerpt before it
  *       can reach Smartsheet, a log line, or an LLM.
  * Use:  called by the scanner (files) and the normalizer (excerpts).
- * Rule: we never log what was redacted — only that redaction happened.
+ * Rule: we never log what was redacted - only that redaction happened.
  */
 const SENSITIVE_PATH = [
   /(^|\/)\.env(\.|$)/i,
