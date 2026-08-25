@@ -94,4 +94,4 @@ Neither row is deleted; both become `Missing in Repo` with Human Review ticked (
 ### Reset between rehearsals
 
 `git checkout -- examples/sample-repo` and either delete the sheet rows or create a fresh sheet with `rsi setup-sheet`; remove `examples/.repo-smartsheet/`.
-pitch url: https://claude.ai/code/artifact/28242430-cc79-440e-9f38-566d3141bdfa
+pitch url: https://repo-smartsheet-intel.vercel.app
