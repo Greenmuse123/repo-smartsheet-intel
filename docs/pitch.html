@@ -265,6 +265,11 @@
   .bar .bn { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-3); text-align: right; font-variant-numeric: tabular-nums; }
   .dash-note { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-3); margin-top: 18px; }
 
+  .cta-row { margin-top: 30px; display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  .cta-demo { display: inline-flex; align-items: center; gap: 9px; background: var(--accent); color: #1a1206; text-decoration: none; font-weight: 600; font-size: 16px; padding: 13px 22px; border-radius: 11px; box-shadow: var(--shadow); }
+  .cta-demo:hover { filter: brightness(1.05); }
+  .cta-note { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--ink-3); }
+
 </style>
 
 <button class="toggle" id="tg" aria-label="Toggle light or dark theme">theme</button>
@@ -280,6 +285,11 @@
     <p class="lede">A command-line tool that reads an existing codebase, turns the project information already hiding inside it into clean Smartsheet rows, and keeps them current, without inventing a single fact.</p>
     <div class="flow">
       <b>Repository</b> <span class="ar">&rarr;</span> Scan <span class="ar">&rarr;</span> Extract <span class="ar">&rarr;</span> Normalize <span class="ar">&rarr;</span> Validate <span class="ar">&rarr;</span> Sync <span class="ar">&rarr;</span> <b>Smartsheet</b>
+    </div>
+
+    <div class="cta-row">
+      <a class="cta-demo" href="/demo/">Open the interactive demo &rarr;</a>
+      <span class="cta-note">Runs the real engine in your browser. No account, no token.</span>
     </div>
 
     <div class="promises">
@@ -623,6 +633,7 @@ Final sheet: 23 rows, 0 deleted.</div>
     </div>
     <div class="run">
       <h3>Try it in three commands</h3>
+      <p style="margin:0 0 16px"><a class="cta-demo" href="/demo/" style="font-size:15px;padding:11px 18px">Or open the interactive demo &rarr;</a></p>
       <pre><span class="cm"># from the app/ folder</span>
 npm install
 npm test                 <span class="cm"># 48 passing</span>
