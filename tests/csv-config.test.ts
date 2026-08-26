@@ -13,9 +13,20 @@ describe('csv fallback', () => {
     const items = normalize([{ extractor: 'todo-comments', sourceType: 'TODO comment', path: 'src/a.js', line: 1, excerpt: 'TODO: say "hi", then leave' }]);
     const csv = csvFor(items, '2026-08-24T00:00:00Z');
     const [header, row] = csv.split('\r\n');
-    expect(header.split(',')).toEqual(COLUMN_TITLES);
+    expect(header.slice(1).split(',')).toEqual(COLUMN_TITLES);
     expect(row).toContain('"say ""hi"", then leave"');
     expect(row).toContain(',New,');
+  });
+  it('writes one UTF-8 BOM while preserving CRLF and non-ASCII text', () => {
+    const items = normalize([{ extractor: 'todo-comments', sourceType: 'TODO comment', path: 'src/a.js', line: 1, excerpt: 'TODO: wait… then continue' }]);
+    const csv = csvFor(items, '2026-08-24T00:00:00Z');
+
+    expect(csv.charCodeAt(0)).toBe(0xFEFF);
+    expect(csv.indexOf('\uFEFF', 1)).toBe(-1);
+    expect(csv.slice(1).startsWith(COLUMN_TITLES.join(','))).toBe(true);
+    expect(csv.split('\r\n')).toHaveLength(3);
+    expect(csv.endsWith('\r\n')).toBe(true);
+    expect(csv).toContain('wait… then continue');
   });
   it('truncates below the 4000-char Smartsheet limit with a visible marker', () => {
     const t = trunc('x'.repeat(5000))!;
