@@ -2,6 +2,11 @@
 
 ## A. With API access (recommended)
 
+> **Plan requirement (verified 2026-08-26 against a live account):** API access needs a
+> **Business plan or higher** (3-member minimum). The **Free plan and the 30-day trial
+> cannot generate a token** - the "Generate new access token" button is present but opens
+> an "Upgrade for Smartsheet API" paywall. If you are on Free or trial, use path B.
+
 1. In Smartsheet: **Account → Apps & Integrations → API Access → Generate new access token**.
 2. `cp .env.example .env` and paste the token as `SMARTSHEET_ACCESS_TOKEN=...` (the file is git-ignored).
 3. `npx rsi setup-sheet` - creates the sheet with all 22 columns, correct types and dropdown options, and prints the sheet id.
@@ -12,6 +17,11 @@
 
 1. `npx rsi export-csv` → `output/<project>/smartsheet_import.csv` and `column-definitions.json`.
 2. In Smartsheet: **Create → Import → Microsoft Excel / CSV**, choose the CSV, tick "first row is header".
+   > The file is **UTF-8 with a byte-order mark, deliberately**. Smartsheet sniffs the encoding
+   > and rejects a BOM-less file with "Failed to upload file" the moment it contains any
+   > multibyte character - which the bundled sample does, via the truncator's `…` ellipsis.
+   > Do not re-save the CSV in an editor that strips the BOM. CRLF line endings are correct
+   > and are not the problem; the exporter keeps all non-ASCII text verbatim on purpose.
 3. Smartsheet imports every column as Text/Number. Set the column types from `column-definitions.json`:
    - Right-click a column header → **Edit Column Properties**.
    - `Type`, `Status`, `Priority`, `Confidence`, `Sync Status`, `Repo Status` → **Dropdown (Single Select)**, paste the options listed in the JSON.
