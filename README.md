@@ -128,7 +128,7 @@ app/
     adapters/csv.ts          CSV + column-definitions fallback
     report/report.ts         Repository Intelligence Report
     log/logger.ts            plain-language logging
-  tests/                     vitest suites (47 tests)
+  tests/                     vitest suites (49 tests)
   examples/sample-repo/      "Orderly" demo repository + sample-repo.project-config.yaml
   docs/                      DATA-MAPPING.md · smartsheet-import.md · DEMO.md
 ```
@@ -138,7 +138,7 @@ app/
 ```
 cd app
 npm install
-npm test          # 47 tests
+npm test          # 49 tests
 npm run typecheck
 ```
 
