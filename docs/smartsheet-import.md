@@ -25,7 +25,19 @@
 3. Smartsheet imports every column as Text/Number. Set the column types from `column-definitions.json`:
    - Right-click a column header → **Edit Column Properties**.
    - `Type`, `Status`, `Priority`, `Confidence`, `Sync Status`, `Repo Status` → **Dropdown (Single Select)**, paste the options listed in the JSON.
-   - `Owner` → **Contact List**. `Due Date`, `Last Repo Update` → **Date**. `Human Review` → **Checkbox** (imported "Yes"/"No" text converts to checked/unchecked).
+   - `Owner` → **Contact List**. `Due Date`, `Last Repo Update` → **Date**.
+   - `Human Review`: **leave it as Text/Number on the CSV path.**
+     > **Verified 2026-08-26 against a live sheet - do not skip this.** Converting the column to
+     > **Checkbox does NOT convert the imported "Yes"/"No" text.** The cells keep the literal
+     > strings, every box renders **unchecked**, and `COUNTIF([Human Review]:[Human Review], true)`
+     > and `COUNTIF(..., 1)` both return **0** while `COUNTIF(..., "Yes")` returns the true count.
+     > A checkbox column that shows 23 empty boxes when 3 items need review is worse than a text
+     > column that says "Yes" - so keep it as text and count `"Yes"`, or tick the boxes by hand.
+     >
+     > **This affects the CSV path only.** `csvFor()` renders booleans as `Yes`/`No`
+     > (`src/adapters/csv.ts:16`), whereas the API path sends a real JSON boolean
+     > (`src/adapters/smartsheet/mapper.ts`), so `rsi sync` produces genuine checkboxes.
+     > This is a concrete reason to prefer path A when a token is available.
 4. Re-importing later: import to a *new* sheet, then compare on **Item ID**; the sync engine's dedup logic only runs on the API path. The CSV is a snapshot; the `Sync Status` column will say `New` for every row.
 
 ## C. Polish (both paths, UI only - a few minutes)
@@ -46,7 +58,7 @@ Create a small sheet `Repo Intelligence - Summary` with one row per metric and a
 | Completed Items | `=COUNTIFS({Status}, OR(@cell = "Done", @cell = "Released"))` |
 | Blocked Items | `=COUNTIF({Status}, "Blocked")` |
 | High-Priority Items | `=COUNTIF({Priority}, "High")` |
-| Items Requiring Review | `=COUNTIF({Human Review}, 1)` |
+| Items Requiring Review | `=COUNTIF({Human Review}, "Yes")` on the CSV path; `=COUNTIF({Human Review}, true)` once synced via the API |
 | Recently Changed (7 days) | `=COUNTIF({Last Repo Update}, >= TODAY(-7))` |
 
 Then **Create → Dashboard** with six Metric widgets pointing at those cells and one Report widget showing the "Needs my attention" filter. That answers "what needs my attention?" in about five seconds.
