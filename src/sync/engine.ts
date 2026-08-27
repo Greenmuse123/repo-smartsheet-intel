@@ -200,11 +200,17 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       const sheetStatus = String(row.cells['Status'] ?? '');
       const repoStatus = String(row.cells['Repo Status'] ?? '');
       if (sheetStatus !== '' && repoStatus !== '' && sheetStatus === repoStatus) {
+        // Clearing the review flag here is only safe when the flag is still OURS. If the sheet
+        // checkbox no longer matches the value we last wrote, a person moved it deliberately
+        // and it is not ours to reset - the same rule the present-item path follows.
+        const sheetReview = row.cells['Human Review'] === true;
+        const ourReview = typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined;
+        const keepReview = ourReview !== undefined && sheetReview !== ourReview ? sheetReview : false;
         changes.push({
           action: 'missing',
           item: { itemId: id, item: String(row.cells['Item'] ?? id) } as ProjectItem,
           rowId: row.rowId,
-          cells: { 'Sync Status': 'Missing in Repo', 'Human Review': false, 'Repo Review': false, 'Last Synced': now },
+          cells: { 'Sync Status': 'Missing in Repo', 'Human Review': keepReview, 'Repo Review': keepReview, 'Last Synced': now },
           reasons: ['conflict resolved by a human; the item is still gone from the repository'],
         });
       }

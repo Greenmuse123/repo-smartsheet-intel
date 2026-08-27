@@ -497,3 +497,20 @@ describe('round-5 review regressions', () => {
     expect(reason).toMatch(/cleared/);
   });
 });
+
+describe('an older sheet without Repo Review must still behave (round-6 self-review)', () => {
+  it('falls back safely when the row has no Repo Review cell at all', async () => {
+    // A sheet created before the Repo Review column existed has no mirror value, and
+    // SmartsheetTarget drops writes to columns the sheet does not have. With no sheet baseline
+    // AND no state file the engine cannot tell its own tick from a person's, so it must keep
+    // the tick: a stale flag costs one glance, a cleared one loses a decision silently.
+    await run(items(ev('src/a.js', 'one')), T1);
+    delete target.rows[0].cells['Repo Review'];      // as an older sheet would have it
+    target.rows[0].cells['Human Review'] = true;     // a person ticks it
+    state = { version: 1, sheetId: 'sheet-1', items: {} }; // and there is no local cache either
+
+    await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
+    expect(target.rows[0].cells['Sync Status']).toBe('Updated');
+    expect(target.rows[0].cells['Human Review']).toBe(true);
+  });
+});
