@@ -22,7 +22,13 @@ export type Priority = (typeof PRIORITIES)[number];
 export const CONFIDENCES = ['High', 'Medium', 'Low'] as const;
 export type Confidence = (typeof CONFIDENCES)[number];
 
-export const SYNC_STATUSES = ['New', 'Synced', 'Updated', 'Conflict', 'Missing in Repo', 'Error'] as const;
+/**
+ * `Conflict (missing in repo)` is not a nicety: a row can genuinely be BOTH conflicted and
+ * gone from the repository, and the two facts live in one cell. Collapsing them loses the
+ * conflict, and reconstructing it from "was missing" alone mislabels every ordinary row that
+ * disappears and returns while a human is simply ahead of the repository.
+ */
+export const SYNC_STATUSES = ['New', 'Synced', 'Updated', 'Conflict', 'Missing in Repo', 'Conflict (missing in repo)', 'Error'] as const;
 export type SyncStatus = (typeof SYNC_STATUSES)[number];
 
 /**

@@ -13,7 +13,7 @@ Repository → Scanner → Extractors → Normalized Project Model → Validatio
 
 - Works with **or without** Smartsheet API access (CSV fallback).
 - `sync --dry-run` shows every change before anything is written.
-- 74 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, the required-column guard on the real Smartsheet target, invalid credentials, authorization vs. token errors, plan-restriction errors, rate-limit retries, and dry-run safety. They run against a fake `fetch`; no test performs a live API call.
+- 78 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, the required-column guard on the real Smartsheet target, invalid credentials, authorization vs. token errors, plan-restriction errors, rate-limit retries, and dry-run safety. They run against a fake `fetch`; no test performs a live API call.
 
 ---
 
@@ -229,7 +229,7 @@ Rows are never deleted. Vanished items → `Missing in Repo` + Human Review, fla
 
 ## API integration
 
-`src/adapters/smartsheet/client.ts`: `fetch`-based, base `https://api.smartsheet.com/2.0`, Bearer auth. Retries 429 (errorCode 4003), 5xx and network errors with exponential backoff (2s·2ⁿ, honours `Retry-After`, up to 5 retries, so at most 6 attempts in total). Writes to one sheet never overlap. Cell text is truncated at 3900 chars with a visible marker (Smartsheet silently truncates at 4000). `setup-sheet` creates the sheet via `POST /sheets` with one primary column and picklist options from `schema.ts`.
+`src/adapters/smartsheet/client.ts`: `fetch`-based, base `https://api.smartsheet.com/2.0`, Bearer auth. Retries 429 (errorCode 4003), 5xx and network errors with exponential backoff (2s·2ⁿ, honours `Retry-After`, up to 5 retries, so at most 6 attempts in total). Writes issued by a single client instance never overlap: they are serialized on one promise chain. That is per-process, not per-sheet - two syncs run at the same time against the same sheet can still interleave, which is why runs are meant to be serialized externally. Cell text is truncated at 3900 chars with a visible marker (Smartsheet silently truncates at 4000). `setup-sheet` creates the sheet via `POST /sheets` with one primary column and picklist options from `schema.ts`.
 
 ## Error handling
 
@@ -294,6 +294,13 @@ The computer reads the sticky notes inside the toy box, copies them neatly onto 
 - **Data model:** `RawEvidence` kept inside `ProjectItem` as the closest safely-publishable quotation (whitespace collapsed, clipped to 400 chars, every free-text field redacted); stable IDs from `sha1(path|normalized text)`; fingerprint over repo-controlled fields minus the line number.
 - **Synchronization:** read sheet once → 3-way merge on shared fields (last-written value is persisted in the sheet as `Repo Status`) → create/update/conflict/missing → batched `POST`/`PUT` ≤400 rows, serialized per sheet.
 - **API interaction:** thin `fetch` client; 429/5xx/network retried with exponential backoff and `Retry-After`; friendly errors for 401/403/404.
+- **Identity is a deterministic digest, and that is a trade-off:** `Item ID` is
+  `sha1(path | normalized text)[0:8]`, unsalted. That is what lets a fresh clone with no state
+  file rebuild identity from the sheet alone - but it also means an observer who can guess a
+  candidate path can confirm the guess offline, and 32 bits is small enough that a collision is
+  possible in a very large repository. Salting would break state-free reconstruction, so the
+  digest stays; collisions are detected rather than silently merged (the planner warns when two
+  rows claim one `Item ID`), and paths are redacted before publication.
 - **State management:** local `state.json` is a cache; `Item ID` + `Repo Fingerprint` + `Repo Status` in the sheet are sufficient to rebuild it (tested). Those three plus `Sync Status` are enforced as required columns: `SmartsheetTarget` refuses to sync a sheet missing any of them rather than silently mislabelling edits.
 - **Security:** sensitive-path gate before ignore rules, regex redaction at the excerpt boundary, env-only credentials, no repo writes.
 - **Conflict handling:** human-controlled columns written on create only; shared columns merged; conflicts keep the human value and flag.

@@ -32,7 +32,7 @@ export const COLUMNS: ColumnDef[] = [
   { title: 'Last Repo Update', type: 'DATE', writtenBy: 'repo', purpose: 'Date of the last commit that touched the source file.' },
   { title: 'Confidence', type: 'PICKLIST', options: [...CONFIDENCES], writtenBy: 'repo', purpose: 'High = literal; Medium = inferred from several signals; Low = suggestion.' },
   { title: 'Human Review', type: 'CHECKBOX', writtenBy: 'shared', purpose: 'Checked when a person should look. Clear it when done.' },
-  { title: 'Sync Status', type: 'PICKLIST', options: [...SYNC_STATUSES], writtenBy: 'repo', purpose: 'New / Synced / Updated / Conflict / Missing in Repo / Error.' },
+  { title: 'Sync Status', type: 'PICKLIST', options: [...SYNC_STATUSES], writtenBy: 'repo', purpose: 'New / Synced / Updated / Conflict / Missing in Repo / Conflict (missing in repo) / Error.' },
   { title: 'AI Suggestion', type: 'TEXT_NUMBER', writtenBy: 'repo', technical: true, purpose: 'Interpretation, never fact. Heuristics and optional LLM notes.' },
   { title: 'Repo Status', type: 'PICKLIST', options: [...STATUSES], writtenBy: 'repo', technical: true, purpose: 'What the repository currently says the status is (basis for conflict detection).' },
   { title: 'Source Commit', type: 'TEXT_NUMBER', writtenBy: 'repo', technical: true, purpose: 'Short commit SHA of the evidence.' },

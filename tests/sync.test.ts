@@ -190,7 +190,9 @@ describe('conflict state survives every path (round-2 review regressions)', () =
     expect(row.cells['Sync Status']).toBe('Conflict');
 
     await run(normalize([other]), T3);                       // the checklist item vanishes
-    expect(row.cells['Sync Status']).toBe('Missing in Repo');
+    // Both facts survive: it is gone AND still disagreed-about. Collapsing this to plain
+    // "Missing in Repo" is what lost the conflict in the first place.
+    expect(row.cells['Sync Status']).toBe('Conflict (missing in repo)');
 
     await run(normalize([check('x'), other]), '2026-08-24T13:00:00Z'); // it returns
     expect(row.cells['Status']).toBe('Blocked');             // human value still kept
@@ -231,8 +233,8 @@ describe('conflict state survives every path (round-3 review regressions)', () =
     await run(normalize([check('x'), other]), T2);
     expect(row.cells['Sync Status']).toBe('Conflict');
 
-    await run(normalize([other]), T3);                        // vanishes; marker overwritten
-    expect(row.cells['Sync Status']).toBe('Missing in Repo');
+    await run(normalize([other]), T3);                        // vanishes, conflict preserved
+    expect(row.cells['Sync Status']).toBe('Conflict (missing in repo)');
 
     // Returns AND the fingerprint moved (section changed) -> the update path.
     const p = await run(normalize([check('x', 'Known issues'), other]), T4);
@@ -274,5 +276,92 @@ describe('conflict state survives every path (round-3 review regressions)', () =
     const p2 = await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T5);
     expect(p2.counts.conflict).toBe(0);
     expect(target.rows[0].cells['Status']).toBe('In Progress');
+  });
+});
+
+
+describe('the missing state must not manufacture conflicts (round-4 review regressions)', () => {
+  const T4 = '2026-08-24T13:00:00Z';
+
+  it('a human ahead of a stable repo does NOT become a conflict by disappearing and returning (N-01)', async () => {
+    // Regression: conflict was carried across the missing state by `wasMissing`, which records
+    // absence and says nothing about who disagreed with whom. Any live disagreement on a
+    // returning row therefore became a Conflict - including the "human is simply ahead of the
+    // repository" case the engine explicitly treats as normal. It was sticky, too: the next
+    // run took the unchanged branch and kept it.
+    const other = ev('src/other.js', 'keep me');
+    const a = ev('src/a.js', 'one');
+    await run(items(a, other), T1);
+    const aId = items(a)[0].itemId;
+    const row = target.rows.find((r) => r.cells['Item ID'] === aId)!;
+    row.cells['Status'] = 'In Progress';                 // human moves ahead; repo stays put
+
+    await run(items(other), T2);                          // a vanishes
+    expect(row.cells['Sync Status']).toBe('Missing in Repo'); // plain missing: never conflicted
+
+    const p = await run(items(a, other), T3);             // and comes back
+    expect(p.counts.conflict).toBe(0);
+    expect(row.cells['Status']).toBe('In Progress');      // human value still kept
+    expect(row.cells['Sync Status']).not.toBe('Conflict');
+
+    const p2 = await run(items(a, other), T4);            // ...and it does not stick
+    expect(p2.counts.conflict).toBe(0);
+    expect(row.cells['Sync Status']).not.toBe('Conflict');
+  });
+
+  it('a repo-only status change while an item is absent is not a conflict either (N-01)', async () => {
+    // Nobody touched the sheet. The repository moved on while the item was gone. That is an
+    // ordinary update, not a disagreement between a person and the code.
+    const other = ev('src/other.js', 'keep me');
+    const check = (state: 'x' | ' ') => ({
+      extractor: 'readme-checklist',
+      sourceType: state === 'x' ? 'Markdown checklist (checked)' : 'Markdown checklist (unchecked)',
+      path: 'README.md', line: 5, section: 'Roadmap', excerpt: 'ship it',
+    } as RawEvidence);
+
+    await run(normalize([check(' '), other]), T1);
+    const id = normalize([check(' ')])[0].itemId;
+    const row = target.rows.find((r) => r.cells['Item ID'] === id)!;
+
+    await run(normalize([other]), T2);                    // vanishes, nobody edits the sheet
+    expect(row.cells['Sync Status']).toBe('Missing in Repo');
+
+    const p = await run(normalize([check('x'), other]), T3); // returns, repo now says Done
+    expect(p.counts.conflict).toBe(0);
+    expect(row.cells['Status']).toBe('Done');
+    expect(row.cells['Sync Status']).not.toBe('Conflict');
+  });
+
+  it('keeps a deliberate human Human Review tick through an unrelated repo change (N-02)', async () => {
+    // Regression: resetting Human Review from the item on every non-conflict path fixed the
+    // stuck-forever case but erased a person's own "look at this" on the next repo change.
+    await run(items(ev('src/a.js', 'one')), T1);
+    expect(target.rows[0].cells['Human Review']).toBe(false);
+    target.rows[0].cells['Human Review'] = true;          // a person ticks it deliberately
+
+    await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2); // unrelated repo change
+    expect(target.rows[0].cells['Sync Status']).toBe('Updated');
+    expect(target.rows[0].cells['Human Review']).toBe(true); // their decision survives
+
+    target.rows[0].cells['Human Review'] = false;         // and they can clear it again
+    await run(items(ev('src/a.js', 'one', { commit: 'def5678' })), T3);
+    expect(target.rows[0].cells['Human Review']).toBe(false);
+  });
+
+  it('still clears the flag it set itself once a conflict is resolved (R3-02 must not regress)', async () => {
+    const check = (state: 'x' | ' ', section = 'Roadmap') => ({
+      extractor: 'readme-checklist',
+      sourceType: state === 'x' ? 'Markdown checklist (checked)' : 'Markdown checklist (unchecked)',
+      path: 'README.md', line: 5, section, excerpt: 'ship it',
+    } as RawEvidence);
+    await run(normalize([check(' ')]), T1);
+    target.rows[0].cells['Status'] = 'Blocked';
+    await run(normalize([check('x')]), T2);
+    expect(target.rows[0].cells['Human Review']).toBe(true);   // we set it
+
+    target.rows[0].cells['Status'] = 'Done';                   // human agrees with the repo
+    await run(normalize([check('x', 'Known issues')]), T3);
+    expect(target.rows[0].cells['Sync Status']).toBe('Updated');
+    expect(target.rows[0].cells['Human Review']).toBe(false);  // ours, so ours to clear
   });
 });

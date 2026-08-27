@@ -4,8 +4,13 @@
  * What: applies the (documented) mapping rules per evidence source, assigns confidence and the
  *       Human Review flag, seeds Owner/Priority ONLY from literal evidence, and redacts excerpts.
  * Use:  `normalize(evidence, { ownerRules })`.
- * Rule: no field is ever guessed. If a rule cannot prove a value, the field stays undefined or
- *       'Unknown'. Interpretation goes to `aiSuggestion`, never to a fact field.
+ * Rule: Owner, Priority, Milestone, Dependency and dates are never guessed. If a rule cannot
+ *       prove one, the field stays undefined or 'Unknown', and interpretation goes to
+ *       `aiSuggestion`, never to a fact field.
+ *       ONE deliberate exception: a TODO/FIXME still present in the code is recorded as
+ *       `Not Started` with High confidence. That is a product rule (an unfinished marker in
+ *       the tree means unfinished work), not evidence of a stated status - and it is the only
+ *       place a Status is asserted rather than read.
  */
 import type { Confidence, ItemType, Priority, ProjectItem, RawEvidence, Status } from './types.js';
 import { fingerprintOf, itemIdFor } from './ids.js';
