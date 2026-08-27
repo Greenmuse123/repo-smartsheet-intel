@@ -26,8 +26,22 @@ export function identityKey(ev: RawEvidence): string {
   }
 }
 
+/**
+ * Identity digest length, in hex characters.
+ *
+ * 8 characters is 32 bits, and a brute-force search found a real collision between two
+ * ordinary generated paths in a few million tries - at which point two genuinely different
+ * items share one row identity, and no amount of duplicate-row handling can repair that: the
+ * sheet cannot tell them apart either. 12 characters is 48 bits, which pushes a collision far
+ * past any plausible repository while keeping the ID short enough to read out loud.
+ *
+ * Changing this changes every Item ID, so a sheet synced by an older build will create fresh
+ * rows once and flag the old ones as Missing in Repo. That is a deliberate one-time migration.
+ */
+const ID_HEX = 12;
+
 export function itemIdFor(ev: RawEvidence): string {
-  const h = createHash('sha1').update(identityKey(ev)).digest('hex').slice(0, 8);
+  const h = createHash('sha1').update(identityKey(ev)).digest('hex').slice(0, ID_HEX);
   return `RSI-${CODE[ev.extractor] ?? 'XX'}-${h}`;
 }
 

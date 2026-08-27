@@ -452,7 +452,9 @@ describe('round-5 review regressions', () => {
     await run(normalize([risk({ commit: 'abc1234' })]), T2); // an unrelated repo change lands
     expect(row.cells['Sync Status']).toBe('Updated');
     expect(row.cells['Human Review']).toBe(false);  // their decision survives with no state file
-    expect(row.cells['Repo Review']).toBe(false);   // and the baseline follows it
+    // The baseline must NOT follow: it still records the `true` WE last wrote, which is what
+    // keeps the sheet value marked as theirs on every later run.
+    expect(row.cells['Repo Review']).toBe(true);
 
     const p = await run(normalize([risk({ commit: 'abc1234' })]), T3);
     expect(p.counts.unchanged).toBe(1);             // settles instead of re-checking every run
@@ -577,7 +579,7 @@ describe('round-6 review regressions', () => {
     expect(p.counts.create).toBe(0);                  // never a third row either
     expect(target.rows).toHaveLength(2);
     expect(target.rows[0].cells['Source Commit']).toBe(original['Source Commit']); // untouched
-    expect(p.changes[0].reasons.join(' ')).toMatch(/more than one sheet row claims/);
+    expect(p.changes[0].reasons.join(' ')).toMatch(/sheet rows claim Item ID/);
   });
 });
 
@@ -640,5 +642,128 @@ describe('the tool must never claim a tick that is already a person\u2019s (roun
     await run(normalize([check(false)]), T4);
     expect(c['Sync Status']).toBe('Synced');
     expect(c['Human Review']).toBe(true);        // and their tick is still there
+  });
+});
+
+describe('round-7 review regressions', () => {
+  const T4 = '2026-08-24T13:00:00Z', T5 = '2026-08-24T14:00:00Z';
+  const risk = (over: Partial<RawEvidence> = {}): RawEvidence => ({
+    extractor: 'risk-heuristics', sourceType: 'Risk heuristic', path: 'src/auth/session.js',
+    line: 5, excerpt: 'FIXME in a security-sensitive file: sessions never expire', ...over,
+  });
+  const check = (c: boolean) => ({
+    extractor: 'readme-checklist',
+    sourceType: c ? 'Markdown checklist (checked)' : 'Markdown checklist (unchecked)',
+    path: 'README.md', line: 3, section: 'S', excerpt: 'ship it',
+  } as RawEvidence);
+
+  it('never re-ticks a box a person deliberately cleared (R7-01)', async () => {
+    // The guard protected a human TICK but not a human CLEAR: the clear was written back as
+    // our own baseline, and the next ordinary repo update saw sheet === baseline and re-ticked
+    // it from the item. Once a person moves this checkbox it is theirs, in either direction.
+    await run(normalize([risk()]), T1);
+    expect(target.rows[0].cells['Human Review']).toBe(true);   // the item asks for review
+    target.rows[0].cells['Human Review'] = false;              // a person looks and clears it
+
+    await run(normalize([risk({ commit: 'abc1234' })]), T2);   // an unrelated repo change
+    expect(target.rows[0].cells['Human Review']).toBe(false);
+    await run(normalize([risk({ commit: 'def5678' })]), T3);   // and another, one run later
+    expect(target.rows[0].cells['Human Review']).toBe(false);  // still cleared, not re-ticked
+  });
+
+  it('does not launder a human tick when resolving a conflict on an absent item (R7-02)', async () => {
+    // That branch wrote BOTH cells to one value instead of using the shared rule, so a tick
+    // that was a person's became tool-authored and a later run cleared it. The tick has to
+    // predate our own flagging for the difference to show: once WE tick a row (conflict,
+    // missing) our baseline matches the sheet and the box is legitimately ours to clear.
+    const other = ev('src/other.js', 'keep me');
+    await run(normalize([check(false), other]), T1);
+    const id = normalize([check(false)])[0].itemId;
+    const row = target.rows.find((r) => r.cells['Item ID'] === id)!;
+    expect(row.cells['Repo Review']).toBe(false);
+    row.cells['Human Review'] = true;                          // a PERSON ticks it first
+
+    row.cells['Status'] = 'Blocked';
+    await run(normalize([check(true), other]), T2);            // conflict
+    expect(row.cells['Repo Review']).toBe(false);              // never claimed as ours
+    await run(normalize([other]), T3);                         // and the item vanishes
+    expect(row.cells['Sync Status']).toBe('Conflict (missing in repo)');
+    expect(row.cells['Repo Review']).toBe(false);
+
+    row.cells['Status'] = String(row.cells['Repo Status']);    // human resolves the conflict
+    await run(normalize([other]), T4);                         // resolve-while-absent
+    expect(row.cells['Sync Status']).toBe('Missing in Repo');
+    expect(row.cells['Human Review']).toBe(true);              // their tick is still theirs
+
+    await run(normalize([check(true), other]), T5);            // the item comes back
+    expect(row.cells['Human Review']).toBe(true);              // and it is still there
+  });
+
+  it('flags every duplicate row when the item vanishes, not just the last (R7-03)', async () => {
+    // The planner kept one row per Item ID, so earlier copies of a vanished item stayed
+    // falsely live on the sheet forever.
+    const a = ev('src/a.js', 'one'), other = ev('src/other.js', 'keep me');
+    await run(items(a, other), T1);
+    const aId = items(a)[0].itemId;
+    const original = target.rows.find((r) => r.cells['Item ID'] === aId)!;
+    target.rows.push({ rowId: 4242, cells: { ...original.cells } } as typeof target.rows[number]);
+
+    await run(items(other), T2);                               // a vanishes; two rows claim it
+    const claimed = target.rows.filter((r) => r.cells['Item ID'] === aId);
+    expect(claimed).toHaveLength(2);
+    for (const r of claimed) expect(r.cells['Sync Status']).toBe('Missing in Repo');
+  });
+
+  it('tells a person what to do when two rows share an Item ID (R7-03)', async () => {
+    const a = ev('src/a.js', 'one');
+    await run(items(a), T1);
+    target.rows.push({ rowId: 4243, cells: { ...target.rows[0].cells } } as typeof target.rows[number]);
+    const p = await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
+    const reason = p.changes[0].reasons.join(' ');
+    expect(reason).toMatch(/2 sheet rows claim Item ID/);
+    expect(reason).toMatch(/collision/); // and does not promise that deleting one always fixes it
+  });
+});
+
+describe('neither baseline may be trusted alone (round-7 R7-04)', () => {
+  const risk = (over: Partial<RawEvidence> = {}): RawEvidence => ({
+    extractor: 'risk-heuristics', sourceType: 'Risk heuristic', path: 'src/auth/session.js',
+    line: 5, excerpt: 'FIXME in a security-sensitive file: sessions never expire', ...over,
+  });
+
+  it('keeps a human tick when the local cache is stale but the sheet mirror is right', async () => {
+    // Making the cache authoritative fixed a stale sheet mirror and created the mirror image
+    // of the same bug: a rolled-back or copied state.json then cleared a real decision.
+    // Use an item that does NOT intrinsically require review, so recomputing would visibly
+    // clear the tick rather than coincidentally reproduce it.
+    await run(items(ev('src/a.js', 'one')), T1);
+    const row = target.rows[0];
+    expect(row.cells['Repo Review']).toBe(false);     // the sheet correctly says we wrote false
+    row.cells['Human Review'] = true;                 // and a person ticks it
+    state.items[items(ev('src/a.js', 'one'))[0].itemId].lastWrittenHumanReview = true; // stale cache
+
+    await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
+    expect(row.cells['Human Review']).toBe(true);     // the disagreeing baseline wins
+  });
+
+  it('keeps a human tick when the sheet mirror is stale but the local cache is right', async () => {
+    await run(normalize([risk()]), T1);
+    const row = target.rows[0];
+    const id = normalize([risk()])[0].itemId;
+    state.items[id].lastWrittenHumanReview = false;   // the cache says we last wrote false
+    row.cells['Repo Review'] = true;                  // stale mirror
+    row.cells['Human Review'] = true;                 // a person has it ticked
+
+    await run(normalize([risk({ commit: 'abc1234' })]), T2);
+    expect(row.cells['Human Review']).toBe(true);
+  });
+
+  it('still recomputes when every baseline agrees with the sheet', async () => {
+    await run(items(ev('src/a.js', 'one')), T1);
+    expect(target.rows[0].cells['Human Review']).toBe(false);
+    expect(target.rows[0].cells['Repo Review']).toBe(false);
+    await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
+    expect(target.rows[0].cells['Sync Status']).toBe('Updated');
+    expect(target.rows[0].cells['Human Review']).toBe(false);
   });
 });

@@ -17,18 +17,23 @@ import { log } from '../log/logger.js';
 
 export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncState, now: string): SyncPlan {
   const byItemId = new Map<string, TargetRow>();
+  const allRowsForId = new Map<string, TargetRow[]>();
   const duplicateIds = new Set<string>();
   for (const r of rows) {
     const id = r.cells['Item ID'];
     if (typeof id !== 'string' || !id) continue;
     if (byItemId.has(id)) duplicateIds.add(id); // two rows claim the same identity
     byItemId.set(id, r);
+    // Keep them ALL. Remembering only the last is what let two items take turns overwriting
+    // one row, and it also left every earlier copy of a vanished item falsely alive.
+    const list = allRowsForId.get(id);
+    if (list) list.push(r); else allRowsForId.set(id, [r]);
   }
   if (duplicateIds.size) {
     // Writing to one of several rows that claim the same Item ID is worse than doing nothing:
     // the map keeps only the last, so two different items would take turns overwriting one
     // row's evidence, flipping it on every run. Leave those rows completely alone and say so.
-    log.warn(`${duplicateIds.size} Item ID(s) appear on more than one row: ${[...duplicateIds].join(', ')}. Those rows are left untouched until a human merges or deletes the duplicates - writing to them would overwrite one item's evidence with another's.`);
+    log.warn(`${duplicateIds.size} Item ID(s) appear on more than one row: ${[...duplicateIds].join(', ')}. Those rows are left untouched until a human resolves them - writing to them would overwrite one item's evidence with another's. If they are copies of one row, delete the extras. If they are genuinely different items that share an ID, that is a digest collision: please report it, because deleting a row will not help.`);
   }
 
   const changes: PlannedChange[] = [];
@@ -38,7 +43,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     seen.add(item.itemId);
     if (duplicateIds.has(item.itemId)) {
       // Not a create either - that would add a third row with the same identity.
-      changes.push({ action: 'unchanged', item, cells: {}, reasons: [`skipped: more than one sheet row claims Item ID ${item.itemId}; merge or delete the duplicates and re-run`] });
+      changes.push({ action: 'unchanged', item, cells: {}, reasons: [`skipped: ${allRowsForId.get(item.itemId)?.length ?? 2} sheet rows claim Item ID ${item.itemId}, so no update can be applied safely. Delete the extra copies; if they are genuinely different items, this is a digest collision and should be reported.`] });
       continue;
     }
     const row = byItemId.get(item.itemId);
@@ -81,19 +86,27 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // sheet against what WE last wrote. If they differ, a person deliberately (un)checked it,
     // and that decision outranks our recomputation.
     const sheetReview = row.cells['Human Review'] === true;
-    // The local cache is written in the same breath as the write it records, so when it exists
-    // it is the most reliable answer to "what did WE last write". `Repo Review` is the fallback
-    // that survives losing the cache - a mirror, not an override, since a technical cell can go
-    // stale (hand-edited, added later to an old sheet, written by an older build).
-    const reviewBaseline = st?.lastWrittenHumanReview
-      ?? (typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined);
-    // The ONE rule for writing the shared checkbox. We must never claim authorship of a tick
-    // that is already a person's: writing `Repo Review = true` over their own true relabels
-    // their decision as ours, and the next resolve or ordinary update then clears it. When the
-    // box is already ticked and it is theirs, write neither cell.
-    const humanOwnsReview = reviewBaseline !== undefined && sheetReview !== reviewBaseline;
-    const writeReview = (want: boolean): CellValues =>
-      (want && sheetReview && humanOwnsReview ? {} : reviewCells(want));
+    // There are two records of what WE last wrote to this checkbox - the local cache and the
+    // sheet's own `Repo Review` mirror - and EITHER can be stale: the cache can be rolled back,
+    // copied between machines or interrupted mid-write, and the mirror can be hand-edited or
+    // added late to an old sheet. Preferring one over the other only moves the lost decision
+    // from one direction to the other, so trust neither alone.
+    //
+    // The rule: the box is ours to recompute only when EVERY baseline we have agrees with what
+    // the sheet says now. If any of them disagrees, someone moved it and it is theirs. That is
+    // conservative in the one direction that matters - a stale flag costs somebody a glance, a
+    // cleared one loses a decision silently.
+    const reviewBaselines = [
+      st?.lastWrittenHumanReview,
+      typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
+    ].filter((b): b is boolean => b !== undefined);
+    const reviewBaseline: boolean | undefined = reviewBaselines[0];
+    const humanOwnsReview = reviewBaselines.some((b) => b !== sheetReview);
+    // Once a person moves it, we stop writing the cell at all - in either direction. Protecting
+    // their ticks but not their clears meant a clear was recorded as our own baseline and then
+    // re-ticked by the next ordinary update. This mirrors how Priority and Owner already work:
+    // seeded once, then hands off.
+    const writeReview = (want: boolean): CellValues => (humanOwnsReview ? {} : reviewCells(want));
     let reviewAfterUpdate: boolean;
     if (reviewBaseline !== undefined) {
       // We know what we last wrote: if the sheet differs, a person changed it and wins.
@@ -221,8 +234,9 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     }, reasons });
   }
 
-  for (const [id, row] of byItemId) {
+  for (const [id, rowsForId] of allRowsForId) {
     if (seen.has(id)) continue;
+    for (const row of rowsForId) {
     const sync = String(row.cells['Sync Status'] ?? '');
     if (sync === 'Conflict (missing in repo)') {
       // A human can resolve a conflict on a row whose item is gone for good. If they have made
@@ -234,14 +248,18 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
         // Clearing the review flag here is only safe when the flag is still OURS. If the sheet
         // checkbox no longer matches the value we last wrote, a person moved it deliberately
         // and it is not ours to reset - the same rule the present-item path follows.
+        // Same rule as the present-item paths: if the person moved the checkbox, it is theirs
+        // and we write neither cell. Writing both to one value here relabelled their tick as
+        // ours, and the next run then cleared it.
         const sheetReview = row.cells['Human Review'] === true;
-        const ourReview = typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined;
-        const keepReview = ourReview !== undefined && sheetReview !== ourReview ? sheetReview : false;
+        const ourReview = state.items[id]?.lastWrittenHumanReview
+          ?? (typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined);
+        const humanOwns = ourReview !== undefined && sheetReview !== ourReview;
         changes.push({
           action: 'missing',
           item: { itemId: id, item: String(row.cells['Item'] ?? id) } as ProjectItem,
           rowId: row.rowId,
-          cells: { 'Sync Status': 'Missing in Repo', 'Human Review': keepReview, 'Repo Review': keepReview, 'Last Synced': now },
+          cells: { 'Sync Status': 'Missing in Repo', ...(humanOwns ? {} : reviewCells(false)), 'Last Synced': now },
           reasons: ['conflict resolved by a human; the item is still gone from the repository'],
         });
       }
@@ -256,9 +274,13 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // `Repo Review` must move with `Human Review` when WE tick it - otherwise the next run
     // reads our own tick as a human edit and strands it. But if the box is already ticked we
     // write neither, so a person's tick stays theirs.
-    const alreadyTicked = row.cells['Human Review'] === true;
-    const reviewCells: CellValues = alreadyTicked ? {} : { 'Human Review': true, 'Repo Review': true };
-    changes.push({ action: 'missing', item: ghost, rowId: row.rowId, cells: { 'Sync Status': label, ...reviewCells, 'Last Synced': now }, reasons: [wasConflict ? 'item no longer found in repository; the unresolved conflict is kept too' : 'item no longer found in repository; row kept for a human to close or merge'] });
+    const sheetReviewNow = row.cells['Human Review'] === true;
+    const ourReviewNow = state.items[id]?.lastWrittenHumanReview
+      ?? (typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined);
+    const humanOwnsNow = ourReviewNow !== undefined && sheetReviewNow !== ourReviewNow;
+    const reviewWrite: CellValues = humanOwnsNow ? {} : reviewCells(true);
+    changes.push({ action: 'missing', item: ghost, rowId: row.rowId, cells: { 'Sync Status': label, ...reviewWrite, 'Last Synced': now }, reasons: [wasConflict ? 'item no longer found in repository; the unresolved conflict is kept too' : 'item no longer found in repository; row kept for a human to close or merge'] });
+    }
   }
 
   const counts = { create: 0, update: 0, unchanged: 0, conflict: 0, missing: 0 };
@@ -316,8 +338,12 @@ function remember(state: SyncState, c: PlannedChange, rowId: number, now: string
     rowId,
     fingerprint: c.item.fingerprint,
     lastWrittenStatus: String((c.cells as CellValues)['Repo Status'] ?? c.item.status),
-    // Not dead state: this is the baseline that tells OUR checkbox from a human's.
-    lastWrittenHumanReview: (c.cells as CellValues)['Human Review'] === true,
+    // Not dead state: this is the baseline that tells OUR checkbox from a human's. It may
+    // only move when we ACTUALLY wrote the cell - recording `false` because we deliberately
+    // left the cell alone would erase the very ownership we were trying to preserve.
+    lastWrittenHumanReview: (c.cells as CellValues)['Human Review'] === undefined
+      ? state.items[c.item.itemId]?.lastWrittenHumanReview
+      : (c.cells as CellValues)['Human Review'] === true,
     lastSyncedAt: now,
   };
 }

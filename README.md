@@ -13,7 +13,7 @@ Repository → Scanner → Extractors → Normalized Project Model → Validatio
 
 - Works with **or without** Smartsheet API access (CSV fallback).
 - `sync --dry-run` shows every change before anything is written.
-- 95 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, the required-column guard on the real Smartsheet target, invalid credentials, authorization vs. token errors, plan-restriction errors, rate-limit retries, and dry-run safety. They run against a fake `fetch`; no test performs a live API call.
+- 103 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, the required-column guard on the real Smartsheet target, invalid credentials, authorization vs. token errors, plan-restriction errors, rate-limit retries, and dry-run safety. They run against a fake `fetch`; no test performs a live API call.
 
 ---
 
@@ -62,7 +62,7 @@ Run step 4 (or 5) again whenever the code changes.
 | Last Repo Update | When that part of the code last changed. |
 | Confidence | High = written plainly in the code. Medium = pieced together from clues. Low = a suggestion. |
 | Human Review | Ticked when a person should look. Untick it when you have. |
-| Sync Status | New, Synced, Updated, Conflict (you and the code disagree), Missing in Repo (the note vanished from the code). |
+| Sync Status | New, Synced, Updated, Conflict (you and the code disagree), Missing in Repo (the note vanished from the code)., Conflict (missing in repo) (both at once - it is gone AND you still disagree; resolve the disagreement and it drops back to Missing in Repo). |
 | AI Suggestion | The program's guesses and notes. Never treated as fact. |
 | Management Notes | Your free-text space. The program never touches it. |
 
@@ -131,7 +131,7 @@ app/
     adapters/csv.ts          CSV + column-definitions fallback
     report/report.ts         Repository Intelligence Report
     log/logger.ts            plain-language logging
-  tests/                     vitest suites (95 tests)
+  tests/                     vitest suites (103 tests)
   examples/sample-repo/      "Orderly" demo repository + sample-repo.project-config.yaml
   docs/                      DATA-MAPPING.md · smartsheet-import.md · DEMO.md
 ```
@@ -141,7 +141,7 @@ app/
 ```
 cd app
 npm install
-npm test          # 95 tests
+npm test          # 103 tests
 npm run typecheck
 ```
 
@@ -205,7 +205,7 @@ ANTHROPIC_API_KEY=         # only if ai.enabled
 
 ## Data model
 
-See `src/model/types.ts`. `RawEvidence` is kept inside `ProjectItem.evidence`. It is the closest quotation of the source the tool can safely publish, not a byte-for-byte copy: whitespace is collapsed, it is clipped to 400 characters, and every free-text field (`excerpt`, `section`, `path`, `sourceType`, `refs`) is passed through the redactor before it can reach a sheet cell, the CSV, a log line or the optional AI payload; interpretation lives in `aiSuggestion`. Item ID = `RSI-<extractor code>-<sha1(path | normalized text)[0:8]>`, stable across line moves. Fingerprint = sha1 over repo-controlled fields **excluding the line number**, so a file gaining a line at the top does not mark everything beneath it as Updated. Full column mapping: `docs/DATA-MAPPING.md`.
+See `src/model/types.ts`. `RawEvidence` is kept inside `ProjectItem.evidence`. It is the closest quotation of the source the tool can safely publish, not a byte-for-byte copy: whitespace is collapsed, it is clipped to 400 characters, and every free-text field (`excerpt`, `section`, `path`, `sourceType`, `refs`) is passed through the redactor before it can reach a sheet cell, the CSV, a log line or the optional AI payload; interpretation lives in `aiSuggestion`. Item ID = `RSI-<extractor code>-<sha1(path | normalized text)[0:12]>`, stable across line moves. Fingerprint = sha1 over repo-controlled fields **excluding the line number**, so a file gaining a line at the top does not mark everything beneath it as Updated. Full column mapping: `docs/DATA-MAPPING.md`.
 
 ## Sync strategy
 
@@ -295,13 +295,13 @@ The computer reads the sticky notes inside the toy box, copies them neatly onto 
 - **Synchronization:** read sheet once → 3-way merge on shared fields (last-written value is persisted in the sheet as `Repo Status`) → create/update/conflict/missing → batched `POST`/`PUT` ≤400 rows, serialized per sheet.
 - **API interaction:** thin `fetch` client; 429/5xx/network retried with exponential backoff and `Retry-After`; friendly errors for 401/403/404.
 - **Identity is a deterministic digest, and that is a trade-off:** `Item ID` is
-  `sha1(path | normalized text)[0:8]`, unsalted. That is what lets a fresh clone with no state
+  `sha1(path | normalized text)[0:12]`, unsalted. That is what lets a fresh clone with no state
   file rebuild identity from the sheet alone - but it also means an observer who can guess a
-  candidate path can confirm the guess offline, and 32 bits is small enough that a collision is
-  possible in a very large repository. Salting would break state-free reconstruction, so the
+  candidate path can confirm the guess offline, and it is 48 bits, widened from 32 after a brute-force
+  search found a real collision between two ordinary generated paths in a few million tries. Salting would break state-free reconstruction, so the
   digest stays; collisions are detected rather than silently merged (the planner warns when two
   rows claim one `Item ID`), and paths are redacted before publication.
 - **State management:** local `state.json` is a cache; `Item ID` + `Repo Fingerprint` + `Repo Status` + `Repo Review` in the sheet are sufficient to rebuild it (tested). Those four plus `Sync Status` are enforced as required columns: `SmartsheetTarget` refuses to sync a sheet missing any of them rather than silently mislabelling edits.
 - **Security:** sensitive-path gate before ignore rules, regex redaction at the excerpt boundary, env-only credentials, no repo writes.
 - **Conflict handling:** human-controlled columns written on create only; shared columns merged; conflicts keep the human value and flag.
-- **Testing:** 95 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.
+- **Testing:** 103 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.

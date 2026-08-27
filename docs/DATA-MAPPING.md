@@ -19,7 +19,7 @@ Source of truth: `src/adapters/smartsheet/schema.ts` (the sheet is created from 
 | 13 | Last Repo Update | Date | last commit touching the file | git | Yes | Overwritten |
 | 14 | Confidence | Dropdown | High / Medium / Low | rule per extractor | Yes | Overwritten |
 | 15 | Human Review | Checkbox | needs a person | rules (Low, Risk, Unknown, Bug w/o owner, conflict, missing) | Yes (sets true) | **Yes** (clear it) - merged |
-| 16 | Sync Status | Dropdown | New / Synced / Updated / Conflict / Missing in Repo / Error | sync engine | Yes | Overwritten |
+| 16 | Sync Status | Dropdown | New / Synced / Updated / Conflict / Missing in Repo / Conflict (missing in repo) / Error | sync engine | Yes | Overwritten |
 | 17 | AI Suggestion | Text | interpretation, never fact | heuristics + optional LLM | Yes | Overwritten |
 | 18 | Repo Status | Dropdown | what the repo says right now (basis for Status conflict detection) | sync engine | Yes | Overwritten |
 | 18a | Repo Review | Checkbox | the Human Review value this tool last wrote (lets your tick be told from ours without a local state file) | sync engine | Yes | Overwritten |

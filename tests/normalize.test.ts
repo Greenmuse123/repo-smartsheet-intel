@@ -72,7 +72,7 @@ describe('identity', () => {
     const c = itemIdFor(todo({ excerpt: 'TODO: add retry with backoff' }));
     expect(a).toBe(b);
     expect(a).not.toBe(c);
-    expect(a).toMatch(/^RSI-TD-[0-9a-f]{8}$/);
+    expect(a).toMatch(/^RSI-TD-[0-9a-f]{12}$/);
   });
   it('fingerprint changes only when repo-controlled fields change', () => {
     const [a] = normalize([todo()]);
@@ -162,17 +162,27 @@ describe('redaction must not destroy identity (round-2 review regression)', () =
 });
 
 
-describe('a hash collision must never discard evidence (round-5 review R5-05)', () => {
-  it('keeps both items when two different files collide in the truncated Item ID', () => {
-    // `seen` de-duplicated on the 8-hex id, so a 32-bit collision between two genuinely
-    // different files silently dropped one of them - the one failure mode this tool must not
-    // have. De-duplication now keys on the full identity string.
+describe('de-duplication must never discard evidence (round-5 review R5-05)', () => {
+  it('keys on the full identity, not on the truncated Item ID', () => {
+    // The bug: `seen` de-duplicated on the 8-hex id, so two genuinely different files that
+    // collided in 32 bits silently lost one - the one failure mode this tool must not have. A
+    // real colliding pair was found by brute force in a few million tries.
+    // Two fixes now stand between that and lost evidence: de-duplication keys on the full
+    // identity string, and the digest is 48 bits rather than 32. Assert the property directly,
+    // since a 48-bit collision is no longer practical to construct.
     const a = todo({ path: 'src/generated/p42207.ts' });
     const b = todo({ path: 'src/generated/p46459.ts' });
-    expect(itemIdFor(a)).toBe(itemIdFor(b)); // a genuine 32-bit collision, verified
+    expect(itemIdFor(a)).not.toBe(itemIdFor(b));   // these two DID collide at 8 hex
     const out = normalize([a, b]);
     expect(out).toHaveLength(2);
     expect(out.map((i) => i.repositoryPath).sort()).toEqual(['src/generated/p42207.ts', 'src/generated/p46459.ts']);
+  });
+
+  it('is long enough that ordinary generated paths do not collide', () => {
+    // A 32-bit digest collided inside 50k synthetic paths in practice. 48 bits must not.
+    const ids = new Set<string>();
+    for (let i = 0; i < 50000; i++) ids.add(itemIdFor(todo({ path: `src/generated/p${i}.ts` })));
+    expect(ids.size).toBe(50000);
   });
 
   it('still collapses genuinely identical evidence seen twice', () => {
@@ -180,3 +190,4 @@ describe('a hash collision must never discard evidence (round-5 review R5-05)', 
     expect(normalize([a, { ...a }])).toHaveLength(1);
   });
 });
+
