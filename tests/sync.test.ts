@@ -1500,3 +1500,29 @@ describe('round-22 review regressions', () => {
     expect(row.cells['Human Review']).toBe(false);
   });
 });
+
+describe('round-23 review regressions', () => {
+  it('records the handover when an already-missing row shows a human move (R23-01)', async () => {
+    // That pass concluded a person had taken the checkbox and then wrote nothing down, so the
+    // conclusion had to be re-derived on every later run from values that cannot express it -
+    // and one of them eventually disagreed. A conclusion nobody records is one nobody keeps.
+    const a = ev('src/a.js', 'one'), other = ev('src/other.js', 'keep me');
+    await run(items(a, other), T1);
+    const aId = items(a)[0].itemId;
+    const row = target.rows.find((r) => r.cells['Item ID'] === aId)!;
+
+    await run(items(other), T2);                            // vanishes: WE tick it
+    expect(row.cells['Human Review']).toBe(true);
+    expect(row.cells['Review Owner']).toBe('tool');
+
+    row.cells['Human Review'] = false;                      // a person clears it
+    await run(items(other), T3);                            // the next sync sees the clear
+    expect(row.cells['Review Owner']).toBe('human');        // and writes down whose it is now
+
+    // From here their decision holds even with no local record at all.
+    state = { version: 1, sheetId: 'sheet-1', items: {} };
+    row.cells['Human Review'] = true;                       // they tick it again themselves
+    await run(items(a, other), '2026-08-24T13:00:00Z');     // and it comes back
+    expect(row.cells['Human Review']).toBe(true);
+  });
+});

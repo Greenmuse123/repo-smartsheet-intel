@@ -93,7 +93,7 @@ Neither row is deleted; both become `Missing in Repo` with Human Review ticked (
 
 ## 4:30 - Close (20s)
 
-"Deterministic parsing, evidence on every row, three field classes so human decisions survive, idempotent sync, dry-run, 138 tests, and a CSV path when there is no API. The optional Claude pass writes to AI Suggestion and may fill an empty Description with a labelled summary; it never writes a fact column."
+"Deterministic parsing, evidence on every row, three field classes so human decisions survive, idempotent sync, dry-run, 139 tests, and a CSV path when there is no API. The optional Claude pass writes to AI Suggestion and may fill an empty Description with a labelled summary; it never writes a fact column."
 
 ---
 

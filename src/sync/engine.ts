@@ -486,10 +486,14 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
         typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
         String(row.cells['Review Owner'] ?? ''),
       );
-      const pending = rule.drift ? rule.write(true) : {};
-      // As on the present-item path, drift must be repaired even when the write changes no
-      // visible cell: that write is the only thing that makes `remember()` run and bring the
-      // local cache back into line.
+      // Repair drift, and - just as importantly - write down a human move when we see one. This
+      // pass concluded a person had taken the checkbox and then said nothing, so the conclusion
+      // had to be re-derived on every later run from values that cannot express it, and one of
+      // them eventually disagreed. A conclusion nobody records is a conclusion nobody keeps.
+      const handover = rule.humanOwns && String(row.cells['Review Owner'] ?? '') !== 'human'
+        ? handReviewToHuman()
+        : {};
+      const pending = { ...(rule.drift ? rule.write(true) : {}), ...handover };
       const differs = rule.drift || Object.entries(pending).some(([k, v]) => row.cells[k] !== v);
       if (differs) {
         changes.push({
@@ -497,7 +501,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
           item: { itemId: id, item: String(row.cells['Item'] ?? id) } as ProjectItem,
           rowId: row.rowId,
           cells: { ...pending, 'Last Synced': now },
-          reasons: ['still missing; review flag brought back into line'],
+          reasons: [Object.keys(handover).length ? 'still missing; recorded that the review flag is now yours' : 'still missing; review flag brought back into line'],
         });
       }
       continue;
