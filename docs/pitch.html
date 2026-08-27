@@ -481,9 +481,9 @@
     <p class="sub">A dashboard built from cross-sheet formulas over the same sheet. It answers what needs my attention in about five seconds. These are the real counts from the demo repository.</p>
     <div class="dash">
       <div class="metrics">
-        <div class="metric m-open"><div class="v">17</div><div class="l">Open items</div></div>
+        <div class="metric m-open"><div class="v">10</div><div class="l">Open items</div></div>
         <div class="metric m-done"><div class="v">6</div><div class="l">Completed</div></div>
-        <div class="metric m-block"><div class="v">0</div><div class="l">Blocked</div></div>
+        <div class="metric m-block"><div class="v">7</div><div class="l">Status unknown</div></div>
         <div class="metric m-hi"><div class="v">1</div><div class="l">High priority</div></div>
         <div class="metric m-rev"><div class="v">3</div><div class="l">Needs review</div></div>
       </div>
@@ -605,7 +605,7 @@ Final sheet: 23 rows, 0 deleted.</div>
   <div class="wrap">
     <p class="eyebrow">Honest status</p>
     <h2 class="sec">Built and verified &mdash; and what is left.</h2>
-    <p class="sub">The tool is complete and tested. One thing is deliberately not claimed as done: the live write against a real Smartsheet account, which needs an API token this build did not have.</p>
+    <p class="sub">The tool is complete and tested, and has now been run against a real Smartsheet account. Still not claimed as done: the live write over the REST API - Smartsheet gates API tokens behind the Business plan and the 30-day trial cannot issue one. The sheet was populated through Smartsheet own CSV import instead.</p>
     <div class="cols2">
       <div class="list done">
         <h3><span class="dot" style="width:9px;height:9px;border-radius:50%;background:var(--good);display:inline-block"></span>Done and verified</h3>
@@ -637,7 +637,7 @@ Final sheet: 23 rows, 0 deleted.</div>
       <pre><span class="cm"># from the app/ folder</span>
 npm install
 npm test                 <span class="cm"># 49 passing</span>
-npx rsi <span class="ac">demo</span>            <span class="cm"># the full storyline, no account needed</span>
+npm run <span class="ac">demo:walkthrough</span>   <span class="cm"># the full storyline, no account needed</span>
 
 <span class="cm"># when you have a Smartsheet token in .env:</span>
 npx rsi <span class="ac">setup-sheet</span>     <span class="cm"># create the sheet with all columns</span>
