@@ -114,20 +114,22 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // exactly like `src/a.ts`.
     //
     // The column is required, so a sheet without it is refused before we ever get here. A blank
-    // VALUE still means "written by an older build", which is only believable if the row was
-    // written by this tool at all - and the fingerprint is what says so. A row with neither is
-    // nobody's, and trusting it was how the guard ended up disabled on exactly the sheets the
-    // migration was meant to protect.
+    // VALUE means "written by a build older than the column" - and the only way to believe that
+    // of THIS item is a fingerprint that matches what this item computes to right now. A
+    // well-formed fingerprint is not enough: any twelve hex characters can be typed into a cell,
+    // and the one thing that cannot be guessed is the item's own content.
+    //
+    // The cost is deliberate. If such a row's content also changed since the last sync there is
+    // no proof left, and the row is left alone with an explanation rather than written over -
+    // the same choice made about matching old rows generally.
     const rowPath = String(row?.cells['Repo Path'] ?? '');
-    // "This tool wrote the row" has to mean the cell looks like something this tool writes, not
-    // merely that somebody typed in it. A presence check accepted a single character.
-    const rowIsOurs = /^[0-9a-f]{12}$/.test(String(row?.cells['Repo Fingerprint'] ?? ''));
+    const rowIsOurs = String(row?.cells['Repo Fingerprint'] ?? '') === item.fingerprint;
     if (row && (rowPath === '' ? !rowIsOurs : rowPath !== item.repositoryPath)) {
       // The row carries this Item ID but points at a different file. Identity always includes
       // the path, so this cannot be the same item: the ID was hand-edited, or two identities
       // collided. Either way, writing this item's content over that row would destroy whatever
       // it actually describes, along with the Owner and Notes somebody put on it.
-      changes.push({ action: 'unchanged', item, cells: {}, reasons: [`skipped: the sheet row using Item ID ${item.itemId} is for a different file (${rowPath || 'no recorded path, and nothing showing this tool wrote it'}), so it is not this item. Fix or remove that row and re-run.`] });
+      changes.push({ action: 'unchanged', item, cells: {}, reasons: [`skipped: the sheet row using Item ID ${item.itemId} is for a different file (${rowPath || 'no recorded path, and nothing on it proves this tool wrote it for this item'}), so it is not this item. Fix or remove that row and re-run.`] });
       continue;
     }
     if (!row) {
@@ -216,7 +218,12 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     );
     const humanOwnsReview = rule.humanOwns;
     const writeReview = rule.write;
-    const reviewAfterUpdate = humanOwnsReview ? sheetReview : item.humanReviewRequired;
+    // A row that is STILL in conflict still needs a person, and that has to be part of the
+    // desired value. Deriving it from the item alone meant the conflict write ticked the box on
+    // run one and the convergence repair unticked it on run two, leaving the row labelled
+    // Conflict but absent from every "needs my attention" filter - which is the one thing the
+    // flag is for.
+    const reviewAfterUpdate = humanOwnsReview ? sheetReview : (item.humanReviewRequired || conflicted);
 
     if (!repoChanged) {
       // The repository has not moved. Two things can still legitimately need a write:

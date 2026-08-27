@@ -1261,10 +1261,26 @@ describe('round-18 review regressions', () => {
     const row = target.rows[0];
     delete row.cells['Repo Path'];                         // as an older build left it
 
-    const p = await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
+    // Unchanged content: the fingerprint still matches, which proves the row is this item.
+    const p = await run(items(ev('src/a.js', 'one')), T2);
     expect(p.counts.update).toBe(1);
     expect(row.cells['Repo Path']).toBe('src/a.js');       // and it is filled in
-    expect(row.cells['Owner']).toBeUndefined();
+  });
+
+  it('leaves a blank-path row alone when its content also changed (R21-02)', async () => {
+    // With no recorded path AND a fingerprint that no longer matches, nothing on the row proves
+    // it is this item - any twelve hex characters can be typed into a cell. Stalling with an
+    // explanation is the same choice made about matching old rows generally: a person can fix
+    // it in a minute, and a wrong write cannot be undone.
+    await run(items(ev('src/a.js', 'one')), T1);
+    const row = target.rows[0];
+    delete row.cells['Repo Path'];
+    const before = { ...row.cells };
+
+    const p = await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
+    expect(p.counts.update).toBe(0);
+    expect(row.cells['Source Commit']).toBe(before['Source Commit']);
+    expect(p.changes[0].reasons.join(' ')).toMatch(/nothing on it proves/);
   });
 });
 
@@ -1383,5 +1399,65 @@ describe('round-20 review regressions', () => {
     // value never matches what comes back and the same repair is planned on every run.
     const planned = String(plan.changes[0].cells['Source']);
     expect(planned.length).toBeLessThanOrEqual(3900);       // what a cell can actually hold
+  });
+});
+
+describe('round-21 review regressions', () => {
+  const check = (c: boolean, section = 'Roadmap') => ({
+    extractor: 'readme-checklist',
+    sourceType: c ? 'Markdown checklist (checked)' : 'Markdown checklist (unchecked)',
+    path: 'README.md', line: 5, section, excerpt: 'ship it',
+  } as RawEvidence);
+
+  it('keeps an unresolved conflict flagged on every later run (R21-01)', async () => {
+    // The conflict write ticked the box on run one, and the convergence repair - which derived
+    // the desired value from the item alone - unticked it on run two. The row stayed labelled
+    // Conflict while vanishing from every "needs my attention" filter, which is the one thing
+    // that flag exists for.
+    await run(normalize([check(false)]), T1);
+    const row = target.rows[0];
+    row.cells['Status'] = 'Blocked';
+    await run(normalize([check(true)]), T2);
+    expect(row.cells['Sync Status']).toBe('Conflict');
+    expect(row.cells['Human Review']).toBe(true);
+
+    for (const t of [T3, '2026-08-24T13:00:00Z', '2026-08-24T14:00:00Z']) {
+      await run(normalize([check(true)]), t);
+      expect(row.cells['Sync Status'], `at ${t}`).toBe('Conflict');
+      expect(row.cells['Human Review'], `at ${t}`).toBe(true);
+    }
+  });
+
+  it('clears the flag once the conflict is actually resolved (R21-01)', async () => {
+    // The flag must follow the conflict, not outlive it.
+    await run(normalize([check(false)]), T1);
+    const row = target.rows[0];
+    row.cells['Status'] = 'Blocked';
+    await run(normalize([check(true)]), T2);
+    expect(row.cells['Human Review']).toBe(true);
+
+    row.cells['Status'] = 'Done';                          // human agrees with the repository
+    await run(normalize([check(true)]), T3);
+    expect(row.cells['Sync Status']).toBe('Synced');
+    expect(row.cells['Human Review']).toBe(false);
+  });
+
+  it('will not take a blank-path row on a well-formed but fabricated fingerprint (R21-02)', async () => {
+    // Requiring the SHAPE of a fingerprint was not proof of anything: twelve hex characters can
+    // be typed into a cell. Only a fingerprint equal to what this item computes to right now
+    // shows the row is this item.
+    await run(items(ev('src/elsewhere.js', 'other')), T1);
+    const row = target.rows[0];
+    const [mine] = items(ev('src/a.js', 'one'));
+    row.cells['Item ID'] = mine.itemId;
+    delete row.cells['Repo Path'];
+    row.cells['Repo Fingerprint'] = 'abcdef012345';        // well-formed, and meaningless
+    row.cells['Owner'] = 'owner-of-other@example.com';
+    const before = { ...row.cells };
+
+    const p = await run(items(ev('src/a.js', 'one')), T2);
+    expect(p.counts.update).toBe(0);
+    expect(row.cells['Item']).toBe(before['Item']);
+    expect(row.cells['Owner']).toBe('owner-of-other@example.com');
   });
 });
