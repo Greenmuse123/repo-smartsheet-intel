@@ -101,7 +101,8 @@
 
   /* ---- hero ---- */
   header.hero { background: var(--paper); border-top: none; position: relative; overflow: hidden; }
-  .hero-inner { padding: 96px 0 72px; position: relative; z-index: 1; }
+  .hero-inner { padding-block: 96px 72px; position: relative; z-index: 1; }
+  @media (max-width: 640px) { .hero-inner { padding-block: 56px 44px; } }
   .kicker { display:flex; align-items:center; gap: 12px; margin-bottom: 26px; flex-wrap: wrap; }
   .kicker .tag {
     font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
@@ -214,10 +215,10 @@
   .list.next li::before { content: "→"; position: absolute; left: 0; color: var(--accent); font-weight: 700; }
 
   /* run box */
-  .run { margin-top: 34px; background: var(--navy); border-radius: 14px; padding: 28px; color: var(--paper); box-shadow: var(--shadow); }
-  :root[data-theme="dark"] .run, :root:not([data-theme="light"]) .run { border: 1px solid var(--line-2); }
-  .run h3 { color: var(--paper); font-family: "IBM Plex Sans", sans-serif; font-size: 18px; margin: 0 0 16px; font-weight: 600; }
-  .run pre { font-family: "IBM Plex Mono", monospace; font-size: 13px; margin: 0; overflow-x: auto; line-height: 1.9; color: #d7ddea; }
+  .run { margin-top: 34px; background: #1d2b49; border-radius: 14px; padding: 28px; color: #eef1f6; box-shadow: var(--shadow); }
+  :root[data-theme="dark"] .run, :root:not([data-theme="light"]) .run { background: #141c2b; border: 1px solid var(--line-2); }
+  .run h3 { color: #eef1f6; font-family: "IBM Plex Sans", sans-serif; font-size: 18px; margin: 0 0 16px; font-weight: 600; }
+  .run pre { font-family: "IBM Plex Mono", monospace; font-size: clamp(11px, 3vw, 13px); margin: 0; overflow-x: auto; line-height: 1.9; color: #d7ddea; }
   .run pre .cm { color: #8f9cb5; }
   .run pre .ac { color: var(--accent); }
   :root:not([data-theme="light"]) .run pre .ac, :root[data-theme="dark"] .run pre .ac { color: #e6ac57; }
@@ -266,6 +267,7 @@
   .dash-note { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-3); margin-top: 18px; }
 
   .cta-row { margin-top: 30px; display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  .run .cta-row { margin: 0 0 18px; gap: 12px; }
   .cta-demo { display: inline-flex; align-items: center; gap: 9px; background: var(--accent); color: #1a1206; text-decoration: none; font-weight: 600; font-size: 16px; padding: 13px 22px; border-radius: 11px; box-shadow: var(--shadow); }
   .cta-demo:hover { filter: brightness(1.05); }
   .cta-note { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--ink-3); }
@@ -481,9 +483,9 @@
     <p class="sub">A dashboard built from cross-sheet formulas over the same sheet. It answers what needs my attention in about five seconds. These are the real counts from the demo repository.</p>
     <div class="dash">
       <div class="metrics">
-        <div class="metric m-open"><div class="v">10</div><div class="l">Open items</div></div>
+        <div class="metric m-open"><div class="v">17</div><div class="l">Open items</div></div>
         <div class="metric m-done"><div class="v">6</div><div class="l">Completed</div></div>
-        <div class="metric m-block"><div class="v">7</div><div class="l">Status unknown</div></div>
+        <div class="metric m-block"><div class="v">0</div><div class="l">Blocked</div></div>
         <div class="metric m-hi"><div class="v">1</div><div class="l">High priority</div></div>
         <div class="metric m-rev"><div class="v">3</div><div class="l">Needs review</div></div>
       </div>
@@ -605,7 +607,7 @@ Final sheet: 23 rows, 0 deleted.</div>
   <div class="wrap">
     <p class="eyebrow">Honest status</p>
     <h2 class="sec">Built and verified &mdash; and what is left.</h2>
-    <p class="sub">The tool is complete and tested, and has now been run against a real Smartsheet account. Still not claimed as done: the live write over the REST API - Smartsheet gates API tokens behind the Business plan and the 30-day trial cannot issue one. The sheet was populated through Smartsheet own CSV import instead.</p>
+    <p class="sub">The tool is complete and tested. One thing is deliberately not claimed as done: the live write against a real Smartsheet account, which needs an API token this build did not have.</p>
     <div class="cols2">
       <div class="list done">
         <h3><span class="dot" style="width:9px;height:9px;border-radius:50%;background:var(--good);display:inline-block"></span>Done and verified</h3>
@@ -637,7 +639,7 @@ Final sheet: 23 rows, 0 deleted.</div>
       <pre><span class="cm"># from the app/ folder</span>
 npm install
 npm test                 <span class="cm"># 49 passing</span>
-npm run <span class="ac">demo:walkthrough</span>   <span class="cm"># the full storyline, no account needed</span>
+npx rsi <span class="ac">demo</span>            <span class="cm"># the full storyline, no account needed</span>
 
 <span class="cm"># when you have a Smartsheet token in .env:</span>
 npx rsi <span class="ac">setup-sheet</span>     <span class="cm"># create the sheet with all columns</span>
