@@ -280,7 +280,6 @@ describe('conflict state survives every path (round-3 review regressions)', () =
   });
 });
 
-
 describe('the missing state must not manufacture conflicts (round-4 review regressions)', () => {
   const T4 = '2026-08-24T13:00:00Z';
 
@@ -367,7 +366,6 @@ describe('the missing state must not manufacture conflicts (round-4 review regre
   });
 });
 
-
 describe('losing state.json must not lose a human decision (round-5 self-review)', () => {
   it('keeps a human Human Review tick when there is no baseline to compare against', async () => {
     // The three-way checkbox merge needs to know what WE last wrote. On a fresh clone there is
@@ -404,7 +402,6 @@ describe('losing state.json must not lose a human decision (round-5 self-review)
     expect(target.rows[0].cells['Human Review']).toBe(false);
   });
 });
-
 
 describe('round-5 review regressions', () => {
   const T4 = '2026-08-24T13:00:00Z', T5 = '2026-08-24T14:00:00Z';
@@ -517,7 +514,6 @@ describe('an older sheet without Repo Review must still behave (round-6 self-rev
     expect(target.rows[0].cells['Human Review']).toBe(true);
   });
 });
-
 
 describe('round-6 review regressions', () => {
   const T4 = '2026-08-24T13:00:00Z', T5 = '2026-08-24T14:00:00Z';
@@ -776,31 +772,6 @@ describe('round-8 review regressions', () => {
     line: 5, excerpt: 'FIXME in a security-sensitive file: sessions never expire', ...over,
   });
 
-  it('adopts a row created before the Item ID was widened, keeping the human columns (R8-04)', async () => {
-    // Widening the digest changes every identity. Without adoption the next sync would add a
-    // second row for every item, mark all the originals Missing in Repo, and strand the Owner,
-    // Priority and Management Notes a person had put on them.
-    const e = ev('src/a.js', 'one');
-    const [item] = items(e);
-    const legacy = item.legacyItemIds![0];
-    expect(legacy).not.toBe(item.itemId);
-    expect(legacy.length).toBeLessThan(item.itemId.length);
-
-    // A sheet as an older build left it: the short ID, plus a person's own columns.
-    await run(items(e), T1);
-    const row = target.rows[0];
-    row.cells['Item ID'] = legacy;
-    Object.assign(row.cells, { Priority: 'High', Owner: 'pm@example.com', 'Management Notes': 'ask Sam' });
-    state = { version: 1, sheetId: 'sheet-1', items: {} };
-
-    const p = await run(items(e), T2);
-    expect(p.counts.create).toBe(0);          // no duplicate row
-    expect(p.counts.missing).toBe(0);         // and the original is not declared missing
-    expect(target.rows).toHaveLength(1);
-    expect(target.rows[0].cells['Item ID']).toBe(item.itemId);   // identity rewritten in place
-    expect(target.rows[0].cells).toMatchObject({ Priority: 'High', Owner: 'pm@example.com', 'Management Notes': 'ask Sam' });
-  });
-
   it('uses one baseline rule on the absent paths too (R8-01)', async () => {
     // The two absent-item paths selected a single baseline with `??`, so a stale cache hid a
     // disagreeing mirror and the missing write overwrote a human clear.
@@ -866,55 +837,6 @@ describe('round-9 review regressions', () => {
     path: 'README.md', line: 3, section: 'S', excerpt: 'ship it',
   } as RawEvidence);
 
-  it('does not launder a real conflict while adopting a legacy row (R9-01)', async () => {
-    // Adoption used to write repoCells and return early, overwriting Repo Status and the
-    // fingerprint BEFORE the three-way merge ran - so a genuine both-sides-moved disagreement
-    // was silently recorded as Synced and could never be reconstructed.
-    // Build the row so that ONLY its identity is out of date: same fingerprint, but the repo
-    // Status and the human Status have both moved away from the last synced value. The old
-    // code took an early return here and wrote Repo Status + the fingerprint before the merge
-    // could see the disagreement at all.
-    const [fresh] = normalize([check(true)]);
-    await run(normalize([check(true)]), T1);               // repo: Done, fingerprint current
-    const row = target.rows[0];
-    row.cells['Item ID'] = fresh.legacyItemIds![0];        // as an older build left it
-    row.cells['Repo Status'] = 'Not Started';              // the last value WE synced
-    row.cells['Status'] = 'In Progress';                   // a person moved away from it
-    state = { version: 1, sheetId: 'sheet-1', items: {} };
-
-    const p = await run(normalize([check(true)]), T2);     // repo says Done: both sides moved
-    expect(target.rows).toHaveLength(1);
-    expect(row.cells['Item ID']).toBe(fresh.itemId);       // identity still rewritten
-    expect(p.counts.conflict).toBe(1);                     // and the conflict is NOT laundered
-    expect(row.cells['Sync Status']).toBe('Conflict');
-    expect(row.cells['Status']).toBe('In Progress');       // human value kept
-    expect(row.cells['Repo Status']).toBe('Done');
-  });
-
-  it('refuses to adopt a row two different items could both claim (R9-02)', async () => {
-    // The historical 32-bit collision gives two current items ONE legacy ID. Adopting on a
-    // first-match basis attached one person's Owner and Notes to whichever item the scan
-    // happened to reach first, and reversing the scan order reversed the decision.
-    const a = todoFor('src/generated/p42207.ts');
-    const b = todoFor('src/generated/p46459.ts');
-    const [ia, ib] = normalize([a, b]);
-    expect(ia.legacyItemIds![0]).toBe(ib.legacyItemIds![0]); // one legacy ID, two items
-
-    await run(normalize([a]), T1);
-    const row = target.rows[0];
-    row.cells['Item ID'] = ia.legacyItemIds![0];
-    Object.assign(row.cells, { Owner: 'b-owner@example.com', 'Management Notes': 'belongs to B' });
-    state = { version: 1, sheetId: 'sheet-1', items: {} };
-
-    const p = await run(normalize([a, b]), T2);
-    expect(p.counts.create).toBe(2);                       // both get fresh rows
-    expect(row.cells['Owner']).toBe('b-owner@example.com'); // the ambiguous row is untouched
-    expect(row.cells['Management Notes']).toBe('belongs to B');
-    const created = target.rows.filter((r) => r.cells['Item ID'] === ia.itemId || r.cells['Item ID'] === ib.itemId);
-    expect(created).toHaveLength(2);
-    for (const r of created) expect(r.cells['Owner']).toBeUndefined(); // nobody inherits by guess
-  });
-
   it('finishes converging the checkbox after drift instead of stalling (R9-03)', async () => {
     // Drift repair writes only the mirror, so the visible value stayed wrong until some
     // unrelated repository change happened along. Nothing else ever revisits a quiet row.
@@ -933,62 +855,6 @@ describe('round-9 review regressions', () => {
     expect(p.counts.unchanged).toBe(1);
   });
 
-  it('a human decision and the state file both survive an adopted rename (R9-03)', async () => {
-    // Adoption looked state up under the NEW id only, so a migrated row arrived with no
-    // baseline at all - the one state the engine can never converge out of.
-    // Migration must not cost a decision or leave a second, stale record behind. The engine
-    // also carries the cached baselines across the rename so an adopted row does not arrive
-    // with no baseline at all - the one state it can never converge out of.
-    const [item] = normalize([risk()]);
-    await run(normalize([risk()]), T1);
-    const row = target.rows[0];
-    expect(row.cells['Human Review']).toBe(true);
-    row.cells['Human Review'] = false;                     // a person clears our flag
-    delete row.cells['Repo Review'];                       // and this sheet has no mirror value
-    row.cells['Item ID'] = item.legacyItemIds![0];
-    state.items[item.legacyItemIds![0]] = state.items[item.itemId];
-    delete state.items[item.itemId];
-
-    await run(normalize([risk()]), T2);
-    expect(row.cells['Item ID']).toBe(item.itemId);
-    expect(row.cells['Human Review']).toBe(false);         // their clear survived the migration
-    expect(state.items[item.legacyItemIds![0]]).toBeUndefined(); // and no stale second record
-  });
-});
-
-describe('legacy adoption must be narrow (round-9 R9-05 / R9-06)', () => {
-  it('refuses a row that merely carries the string, and is not the same item (R9-05)', async () => {
-    // The candidate ID is just text, and any row can carry it. A genuine legacy row is the SAME
-    // item under an older ID, so its Item text must match - identity is derived from that text.
-    const e = ev('src/a.js', 'one');
-    const [item] = items(e);
-    await run(items(ev('src/z.js', 'something else entirely')), T1);
-    const row = target.rows[0];
-    row.cells['Item ID'] = item.legacyItemIds![0];         // unrelated row, right-looking ID
-    const before = { ...row.cells };
-
-    const p = await run(items(e), T2);
-    expect(p.counts.create).toBe(1);                       // the real item gets its own row
-    expect(row.cells['Item']).toBe(before['Item']);        // and the stranger is untouched
-    expect(row.cells['Description']).toBe(before['Description']);
-  });
-
-  it('does not report an adopted row as still Missing in Repo for a run (R9-06)', async () => {
-    // Adoption used to preserve the old Sync Status verbatim, so a migrated row that had been
-    // flagged missing stayed missing for one completed sync before correcting itself.
-    const e = ev('src/a.js', 'one'), other = ev('src/other.js', 'keep me');
-    const [item] = items(e);
-    await run(items(e, other), T1);
-    const row = target.rows.find((r) => r.cells['Item ID'] === item.itemId)!;
-    await run(items(other), T2);                           // it vanishes and is flagged
-    expect(row.cells['Sync Status']).toBe('Missing in Repo');
-
-    row.cells['Item ID'] = item.legacyItemIds![0];         // an older build's identity
-    state = { version: 1, sheetId: 'sheet-1', items: {} };
-    await run(items(e, other), T3);                        // it is back, under the new ID
-    expect(row.cells['Item ID']).toBe(item.itemId);
-    expect(row.cells['Sync Status']).not.toBe('Missing in Repo');
-  });
 });
 
 describe('round-10 review regressions', () => {
@@ -1069,32 +935,6 @@ describe('round-10 review regressions', () => {
     expect(p2.counts.unchanged).toBe(1);                    // and it settles, never sticks
   });
 
-  it('adopts a path-keyed item whose displayed text changed (R10-03)', async () => {
-    // For CI, tests and ADR the identity is the path alone, so a job or heading can be renamed
-    // without the ID changing. Requiring the Item text to match rejected those and stranded a
-    // human-owned row as Missing in Repo.
-    const ci = (section: string): RawEvidence => ({
-      extractor: 'ci', sourceType: 'CI workflow', path: '.github/workflows/ci.yml', line: 1, section,
-      excerpt: 'CI',
-    });
-    const [before] = normalize([ci('old-job')]);
-    const [after] = normalize([ci('renamed-job')]);
-    expect(after.itemId).toBe(before.itemId);               // same identity, different display
-    expect(after.item).not.toBe(before.item);
-
-    await run(normalize([ci('old-job')]), T1);
-    const row = target.rows[0];
-    row.cells['Item ID'] = after.legacyItemIds![0];
-    row.cells['Owner'] = 'human@example.com';
-    state = { version: 1, sheetId: 'sheet-1', items: {} };
-
-    const p = await run(normalize([ci('renamed-job')]), T2);
-    expect(p.counts.create).toBe(0);                        // adopted, not duplicated
-    expect(p.counts.missing).toBe(0);
-    expect(target.rows).toHaveLength(1);
-    expect(row.cells['Item ID']).toBe(after.itemId);
-    expect(row.cells['Owner']).toBe('human@example.com');   // their column carried over
-  });
 });
 
 describe('round-11 review regressions', () => {
@@ -1120,39 +960,6 @@ describe('round-11 review regressions', () => {
     expect(row.cells['Human Review']).toBe(true);          // still theirs two runs later
   });
 
-  it('refuses to adopt a different TODO that lives in the same file (R10-03)', async () => {
-    // Source-file equality is not item equality: two TODOs share one file. For text-keyed
-    // extractors the Item text IS the identity, so it is the right thing to compare.
-    const a: RawEvidence = { extractor: 'todo-comments', sourceType: 'TODO comment', path: 'src/shared.ts', line: 1, excerpt: 'TODO: first thing' };
-    const b: RawEvidence = { extractor: 'todo-comments', sourceType: 'TODO comment', path: 'src/shared.ts', line: 9, excerpt: 'TODO: second thing' };
-    const [ia] = normalize([a]);
-    await run(normalize([b]), T1);                         // the sheet holds item B
-    const row = target.rows[0];
-    row.cells['Item ID'] = ia.legacyItemIds![0];           // but wearing A's older ID
-    row.cells['Owner'] = 'owner-of-b@example.com';
-
-    const p = await run(normalize([a]), T2);
-    expect(p.counts.create).toBe(1);                       // A gets its own row
-    expect(row.cells['Owner']).toBe('owner-of-b@example.com');
-    expect(row.cells['Item']).toBe('second thing');        // B's row is left entirely alone
-  });
-
-  it('does not confuse two files whose names contain " - " (R10-03)', async () => {
-    // Splitting Source on ' - ' collapsed `src/a - one.ts` and `src/a - two.ts` to `src/a`.
-    const ci = (path: string, section: string): RawEvidence => ({
-      extractor: 'ci', sourceType: 'CI workflow', path, line: 1, section, excerpt: 'CI',
-    });
-    const [one] = normalize([ci('.github/workflows/a - one.yml', 'j1')]);
-    await run(normalize([ci('.github/workflows/a - two.yml', 'j2')]), T1);
-    const row = target.rows[0];
-    row.cells['Item ID'] = one.legacyItemIds![0];
-    row.cells['Owner'] = 'owner-of-two@example.com';
-
-    const p = await run(normalize([ci('.github/workflows/a - one.yml', 'j1')]), T2);
-    expect(p.counts.create).toBe(1);
-    expect(row.cells['Owner']).toBe('owner-of-two@example.com');
-  });
-
   it('repairs a drifted cache even when the mirror already shows the visible value (R9-03)', async () => {
     // Drift where the mirror already equals the sheet writes no cell, so nothing made
     // remember() run and the local cache stayed wrong - every run, forever.
@@ -1170,43 +977,6 @@ describe('round-11 review regressions', () => {
 });
 
 describe('round-12 review regressions', () => {
-  it('adopts a long clipped item when the content itself has not changed (R12)', async () => {
-    // Cells clip at 3900 characters, so a long item exists on the sheet only in clipped form.
-    // Its fingerprint is unaffected by that, which is exactly why the fingerprint - not the
-    // displayed text - is what proves the row is this item.
-    const deps = Array.from({ length: 400 }, (_, i) => `pkg-${i}@1.0.0`).join(', ');
-    const e: RawEvidence = { extractor: 'manifests', sourceType: 'Declared dependency', path: 'package.json', line: 1, section: 'deps', excerpt: deps };
-    const [item] = normalize([e]);
-    await run(normalize([e]), T1);
-    const row = target.rows[0];
-    expect(String(row.cells['Item']).length).toBeLessThan(item.item.length); // it WAS clipped
-    row.cells['Item ID'] = item.legacyItemIds![0];
-    row.cells['Owner'] = 'human@example.com';
-    state = { version: 1, sheetId: 'sheet-1', items: {} };
-
-    const p = await run(normalize([e]), T2);
-    expect(p.counts.create).toBe(0);                       // adopted, not duplicated
-    expect(row.cells['Item ID']).toBe(item.itemId);
-    expect(row.cells['Owner']).toBe('human@example.com');
-  });
-
-  it('refuses to adopt when the content changed too, rather than guessing (R13)', async () => {
-    // With the content changed in the same run there is no proof the row is this item, and
-    // adopting hands one item another person's Owner and Notes. A fresh row plus a Missing flag
-    // on the old one is honest and a person can merge it; a silent guess cannot be undone.
-    const e = ev('src/a.js', 'one');
-    const [item] = items(e);
-    await run(items(e), T1);
-    const row = target.rows[0];
-    row.cells['Item ID'] = item.legacyItemIds![0];
-    row.cells['Owner'] = 'human@example.com';
-    state = { version: 1, sheetId: 'sheet-1', items: {} };
-
-    const p = await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
-    expect(p.counts.create).toBe(1);                       // a fresh row...
-    expect(p.counts.missing).toBe(1);                      // ...and the old one is flagged
-    expect(row.cells['Owner']).toBe('human@example.com');  // their column is never moved
-  });
 
   it('will not hand one item the row of another that merely displays the same text (R12)', async () => {
     // Displayed Item text can be shortened, so two different items CAN show the same string.
@@ -1226,79 +996,6 @@ describe('round-12 review regressions', () => {
   });
 });
 
-describe('round-13 review regressions', () => {
-  it('will not adopt two secret-bearing items onto one row just because they redact alike (R14)', async () => {
-    // Identity used to be computed from the REDACTED evidence, so secret-bearing items have a
-    // different published ID on an older sheet. Offering that older ID as an alias would let
-    // those rows be adopted - but redaction is the very operation that makes two different
-    // items identical, so the alias cannot tell them apart, and neither can anything else on
-    // the sheet: they share the alias, the published Source AND the fingerprint.
-    const withSecret = (secret: string, line: number): RawEvidence => ({
-      extractor: 'todo-comments', sourceType: 'TODO comment', path: 'src/a.ts', line,
-      excerpt: `TODO: rotate token=${secret} before launch`,
-    });
-    const [ia] = normalize([withSecret('aaaaaaaaaaaa', 1)]);
-    const [ib] = normalize([withSecret('bbbbbbbbbbbb', 9)]);
-    expect(ia.itemId).not.toBe(ib.itemId);                  // distinct identities...
-    await run(normalize([withSecret('bbbbbbbbbbbb', 9)]), T1);
-    const row = target.rows[0];
-    expect(row.cells['Description']).toBe(target.rows[0].cells['Description']); // ...that publish alike
-    row.cells['Owner'] = 'owner-of-b@example.com';
-    row.cells['Management Notes'] = 'belongs to B';
-
-    // Whatever older ID that row might be wearing, A must never take it over.
-    for (const candidate of [...(ia.legacyItemIds ?? []), ib.itemId, ...(ib.legacyItemIds ?? [])]) {
-      row.cells['Item ID'] = candidate;
-      const before = { owner: row.cells['Owner'], notes: row.cells['Management Notes'] };
-      await run(normalize([withSecret('aaaaaaaaaaaa', 1)]), T2);
-      expect(row.cells['Owner']).toBe(before.owner);
-      expect(row.cells['Management Notes']).toBe(before.notes);
-      target.rows = target.rows.filter((r) => r.rowId === row.rowId);
-      state = { version: 1, sheetId: 'sheet-1', items: {} };
-    }
-  });
-
-  it('will not adopt a row that is another live item\u2019s current identity (R14)', async () => {
-    // An older alias of one item can equal the CURRENT id of another. That row is not a
-    // leftover - it belongs to a live item - so adopting it planned two writes to one physical
-    // row and left one of the items without a row at all, decided purely by scan order.
-    //
-    // The row here is built so the proof gate WOULD pass for A (A's own Source and fingerprint),
-    // which is the only situation in which this guard is what stops the collision.
-    const a = ev('src/a.js', 'one');
-    const b = ev('src/b.js', 'two');
-    const [ia, ib] = normalize([a, b]);
-    await run(items(a), T1);                                // one row, carrying A's content
-    const row = target.rows[0];
-    row.cells['Item ID'] = ib.itemId;                       // ...but wearing B's live identity
-    (ia as { legacyItemIds?: string[] }).legacyItemIds = [ib.itemId];
-    state = { version: 1, sheetId: 'sheet-1', items: {} };
-
-    const plan = planSync([ia, ib], await target.readRows(), state, T2);
-    await applyPlan(plan, target, state, T2);
-
-    const writesToThatRow = plan.changes.filter((c) => c.rowId === row.rowId && c.action !== 'unchanged');
-    expect(writesToThatRow).toHaveLength(1);                // never two items writing one row
-    expect(target.rows.filter((r) => r.cells['Item ID'] === ia.itemId)).toHaveLength(1);
-    expect(target.rows.filter((r) => r.cells['Item ID'] === ib.itemId)).toHaveLength(1);
-  });
-
-  it('will not adopt a same-fingerprint row that belongs to a different file (R13)', async () => {
-    // The fingerprint excludes the line number and is not unique on its own, so it was possible
-    // to hand a row from another file to this item purely on a fingerprint match.
-    const a = ev('src/a.js', 'one');
-    const [ia] = items(a);
-    await run(items(ev('src/elsewhere.js', 'one')), T1);
-    const row = target.rows[0];
-    row.cells['Item ID'] = ia.legacyItemIds![0];
-    row.cells['Repo Fingerprint'] = ia.fingerprint;        // same fingerprint, different file
-    row.cells['Owner'] = 'owner-elsewhere@example.com';
-
-    const p = await run(items(a), T2);
-    expect(p.counts.create).toBe(1);
-    expect(row.cells['Owner']).toBe('owner-elsewhere@example.com');
-  });
-});
 
 describe('a raised warning must survive every baseline history (round-14 R14-04)', () => {
   it('stays ticked from any starting cache/mirror combination', async () => {
@@ -1326,5 +1023,72 @@ describe('a raised warning must survive every baseline history (round-14 R14-04)
         expect(row.cells['Human Review'], `run 4 with cache=${cache} mirror=${mirror}`).toBe(true);
       }
     }
+  });
+});
+
+
+describe('the tool never guesses which old row belongs to which item (round-15)', () => {
+  it('gives an item a fresh row rather than claiming one that predates its Item ID', async () => {
+    // Adoption of rows carrying an older Item ID was tried four times and defeated four times:
+    // displayed text is clipped, several items share a file, an old digest can collide, and
+    // redaction makes two items identical by design. Guessing wrong moves a person's Owner and
+    // Management Notes onto the wrong work and cannot be undone. So the tool no longer guesses.
+    const e = ev('src/a.js', 'one');
+    const [item] = items(e);
+    await run(items(e), T1);
+    const row = target.rows[0];
+    row.cells['Item ID'] = item.legacyItemIds![0];         // as an older build left it
+    row.cells['Owner'] = 'human@example.com';
+    row.cells['Management Notes'] = 'mine';
+    state = { version: 1, sheetId: 'sheet-1', items: {} };
+
+    const p = await run(items(e), T2);
+    expect(p.counts.create).toBe(1);                       // a fresh row for the item...
+    expect(p.counts.missing).toBe(1);                      // ...and the old one is flagged
+    expect(row.cells['Owner']).toBe('human@example.com');  // with everything they put on it
+    expect(row.cells['Management Notes']).toBe('mine');
+    expect(row.cells['Sync Status']).toBe('Missing in Repo');
+  });
+
+  it('refuses to write to a row whose Item ID points at a different file', async () => {
+    // Identity always includes the path, so a row bearing this Item ID but describing another
+    // file cannot be this item - the ID was hand-edited, or two identities collided. Writing
+    // over it would destroy whatever it actually describes.
+    await run(items(ev('src/elsewhere.js', 'other')), T1);
+    const row = target.rows[0];
+    const [mine] = items(ev('src/a.js', 'one'));
+    row.cells['Item ID'] = mine.itemId;
+    const before = { ...row.cells };
+
+    const p = await run(items(ev('src/a.js', 'one')), T2);
+    expect(p.counts.create).toBe(0);
+    expect(p.counts.update).toBe(0);
+    expect(row.cells['Item']).toBe(before['Item']);        // untouched
+    expect(p.changes[0].reasons.join(' ')).toMatch(/points at a different file/);
+  });
+});
+
+describe('a raise is dismissible, and stays dismissed (round-15 R15-03)', () => {
+  const risk = (over: Partial<RawEvidence> = {}): RawEvidence => ({
+    extractor: 'risk-heuristics', sourceType: 'Risk heuristic', path: 'src/auth/session.js',
+    line: 5, excerpt: 'FIXME in a security-sensitive file: sessions never expire', ...over,
+  });
+
+  it('does not re-tick a box the person cleared, even when the item itself wants review', async () => {
+    // Pinning the baselines made the raise durable but destroyed the ownership record, so on
+    // any item the model wants reviewed the box came back after every clear. One boolean cannot
+    // say both "the box is ticked" and "who ticked it" - the raise is recorded separately now.
+    await run(normalize([risk()]), T1);
+    const row = target.rows[0];
+    row.cells['Repo Status'] = 'Done';                     // stale mirror
+    row.cells['Status'] = 'In Progress';                   // and somebody disagrees
+    await run(normalize([risk()]), T2);
+    expect(row.cells['Human Review']).toBe(true);          // raised
+
+    row.cells['Human Review'] = false;                     // the person dismisses it
+    await run(normalize([risk({ commit: 'abc1234' })]), T3);
+    expect(row.cells['Human Review']).toBe(false);
+    await run(normalize([risk({ commit: 'def5678' })]), '2026-08-24T13:00:00Z');
+    expect(row.cells['Human Review']).toBe(false);         // and it stays dismissed
   });
 });

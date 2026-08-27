@@ -5,8 +5,10 @@ Source of truth: `src/adapters/smartsheet/schema.ts` (the sheet is created from 
 | # | Column | Smartsheet type | Purpose | Source in repository | AI/sync may populate | Humans may edit |
 |---|---|---|---|---|---|---|
 > **Item ID length changed.** The digest is 12 hex characters (48 bits); it was 8. A sheet
-> written by an older build is upgraded in place - the planner adopts each old row and rewrites
-> its `Item ID`, so no row is duplicated and no human-controlled column is touched.
+> written by an older build is NOT matched up automatically: each item gets a fresh row and the
+> old rows are flagged `Missing in Repo` with your columns intact, to be merged by hand. Nothing
+> on a sheet reliably says which item an old row belongs to, and guessing wrong would move your
+> notes onto the wrong work.
 
 | 1 | Item ID | Text (primary) | Join key; stable across line moves | `sha1(path \| normalized text)` | Yes (create) | **No** |
 | 2 | Item | Text | Short title | comment text / checklist text / version / ADR title | Yes (create + update) | Overwritten on repo change |

@@ -80,35 +80,6 @@ function sameSourcePath(source: string, repositoryPath: string): boolean {
   return rest === '' || rest.startsWith(':') || rest.startsWith(' - ');
 }
 
-/**
- * Is this sheet row really the same item, under an older ID?
- *
- * For most extractors identity is `path | normalized text`, and the Item column IS that text -
- * so Item equality is identity equality, and two different TODOs in one file are correctly
- * refused. For the path-keyed extractors identity is the path alone, so their Item text can
- * legitimately change (a renamed CI job) and only the file can be compared.
- */
-function looksLikeSameItem(row: TargetRow, item: ProjectItem): boolean {
-  // Adopting a row hands one item another's Owner, Priority and Management Notes, so this asks
-  // for PROOF, not resemblance. Every weaker test tried here was defeated by two items that
-  // look alike on the sheet: displayed text is clipped, several items share a file, and an old
-  // digest can collide. None of those can be told apart from what a row actually shows.
-  //
-  // The fingerprint is the only sheet value that is a function of the item's whole content, so
-  // it is the proof - paired with the file, since a fingerprint excludes the line number and is
-  // therefore not unique on its own. When the content ALSO changed in the same run there is no
-  // proof left, and the honest outcome is a fresh row plus a "Missing in Repo" flag on the old
-  // one, which a person can merge, rather than a silent guess that attaches their notes to the
-  // wrong work.
-  // For CI, tests and ADR the identity IS the path, so two of them can never share a file and
-  // the Source column alone proves which item a row is - even if its displayed text was
-  // renamed in the same run. Every other extractor puts several items in one file, so the path
-  // proves nothing on its own and the fingerprint has to carry it.
-  if (!sameSourcePath(String(row.cells['Source'] ?? ''), item.repositoryPath)) return false;
-  if (isPathKeyed(item.itemId)) return true;
-  return String(row.cells['Repo Fingerprint'] ?? '') === item.fingerprint;
-}
-
 export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncState, now: string): SyncPlan {
   const byItemId = new Map<string, TargetRow>();
   const allRowsForId = new Map<string, TargetRow[]>();
@@ -133,16 +104,6 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
   const changes: PlannedChange[] = [];
   const seen = new Set<string>();
 
-  // Two current items can share ONE legacy ID - that is precisely the 32-bit collision the
-  // widening was meant to survive. Adopting on a first-match basis would then attach a human's
-  // Owner and Management Notes to whichever item happened to come first in the scan. Count the
-  // claims and refuse to adopt any ID more than one item could mean.
-  const legacyClaims = new Map<string, number>();
-  const currentIds = new Set(items.map((i) => i.itemId));
-  for (const it of items) {
-    for (const legacy of it.legacyItemIds ?? []) legacyClaims.set(legacy, (legacyClaims.get(legacy) ?? 0) + 1);
-  }
-
   for (const item of items) {
     seen.add(item.itemId);
     if (duplicateIds.has(item.itemId)) {
@@ -150,43 +111,14 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       changes.push({ action: 'unchanged', item, cells: {}, reasons: [`skipped: ${allRowsForId.get(item.itemId)?.length ?? 2} sheet rows claim Item ID ${item.itemId}, so no update can be applied safely. Delete the extra copies; if they are genuinely different items, this is a digest collision and should be reported.`] });
       continue;
     }
-    let row = byItemId.get(item.itemId);
-    let adoptedFrom: string | undefined;
-    if (!row) {
-      // A sheet synced before the digest was widened has this item under its old, shorter ID.
-      // Adopt that row and rewrite its identity in place. Creating a fresh row instead would
-      // duplicate every item, mark every original Missing in Repo, and strand the Owner,
-      // Priority and Management Notes a person had put on them.
-      for (const legacy of item.legacyItemIds ?? []) {
-        const old = byItemId.get(legacy);
-        if (!old || duplicateIds.has(legacy) || seen.has(legacy)) continue;
-        // The candidate is just a string, and any row could happen to carry it, so check that
-        // the row really is this item before replacing its repo-controlled fields.
-        //
-        // Not by Item text: for the path-keyed extractors (CI, tests, ADR) identity is the path
-        // alone, so a job or heading can be renamed without changing the ID at all - and
-        // rejecting those left a human-owned row stranded as Missing. Compare the source file
-        // instead, which IS part of every identity.
-        if (!looksLikeSameItem(old, item)) {
-          log.warn(`Not adopting sheet row ${legacy}: it carries that older Item ID but is not this item, so its contents are left alone.`);
-          continue;
-        }
-        if (currentIds.has(legacy)) {
-          // This older ID is some OTHER item's CURRENT identity, so that row is not a leftover -
-          // it belongs to a live item. Adopting it would plan two writes to one row and leave
-          // the other item without one, and which of them won depended on scan order.
-          log.warn(`Not adopting sheet row ${legacy}: that is the current Item ID of another item, so the row is not an old copy of this one.`);
-          continue;
-        }
-        if ((legacyClaims.get(legacy) ?? 0) > 1) {
-          // Ambiguous: more than one of today's items would claim this row. Leave it alone and
-          // let it be flagged Missing in Repo, which is honest, rather than guess and silently
-          // attach one person's notes to the wrong item.
-          log.warn(`Not adopting sheet row ${legacy}: more than one current item has that older Item ID, so which one it belongs to cannot be determined. It will be flagged "Missing in Repo" and the items get fresh rows.`);
-          continue;
-        }
-        row = old; adoptedFrom = legacy; seen.add(legacy); break;
-      }
+    const row = byItemId.get(item.itemId);
+    if (row && !sameSourcePath(String(row.cells['Source'] ?? ''), item.repositoryPath) && String(row.cells['Repo Fingerprint'] ?? '') !== '') {
+      // The row carries this Item ID but points at a different file. Identity always includes
+      // the path, so this cannot be the same item: the ID was hand-edited, or two identities
+      // collided. Either way, writing this item's content over that row would destroy whatever
+      // it actually describes, along with the Owner and Notes somebody put on it.
+      changes.push({ action: 'unchanged', item, cells: {}, reasons: [`skipped: the sheet row using Item ID ${item.itemId} points at a different file (${String(row.cells['Source'] ?? '')}), so it is not this item. Fix or remove that row and re-run.`] });
+      continue;
     }
     if (!row) {
       changes.push({ action: 'create', item, cells: { ...repoCells(item, 'New', now), ...humanSeedCells(item), ...sharedCells(item.status), ...reviewCells(item.humanReviewRequired) }, reasons: ['not in sheet yet'] });
@@ -202,8 +134,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // Every cache entry records the physical `rowId` it describes. Use it: an entry filed
     // under either id may belong to a DIFFERENT row (one an earlier split created and a person
     // has since deleted), and believing it reads as drift and clears a real human tick.
-    const cacheCandidates = [adoptedFrom ? state.items[adoptedFrom] : undefined, state.items[item.itemId]]
-      .filter((c): c is NonNullable<typeof c> => c !== undefined);
+    const cacheCandidates = [state.items[item.itemId]].filter((c): c is NonNullable<typeof c> => c !== undefined);
     const st = cacheCandidates.find((c) => c.rowId === row.rowId) ?? cacheCandidates[0];
     // A cache that describes some other row tells us nothing about what we wrote to THIS one.
     const stForReview = cacheCandidates.find((c) => c.rowId === row.rowId);
@@ -223,7 +154,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // which permanently laundered a genuine both-sides-moved conflict into "Synced". Treating
     // it as a change also guarantees the write happens - the fingerprint matches, so the
     // ordinary path would call it unchanged and leave the old ID on the sheet forever.
-    const repoChanged = sheetFingerprint !== item.fingerprint || adoptedFrom !== undefined;
+    const repoChanged = sheetFingerprint !== item.fingerprint;
     const sync = String(row.cells['Sync Status'] ?? '');
     // Both flags read the same cell, which is why that cell has to be able to hold both facts.
     const alreadyConflict = sync === 'Conflict' || sync === 'Conflict (missing in repo)';
@@ -256,7 +187,12 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // the sheet says now. If any of them disagrees, someone moved it and it is theirs. That is
     // conservative in the one direction that matters - a stale flag costs somebody a glance, a
     // cleared one loses a decision silently.
-    const rule = reviewRule(
+    // While a raise is outstanding the checkbox is not ours to touch. If the person has since
+    // unticked it, the raise is over and their decision is what the ownership rule then sees.
+    const raiseOutstanding = stForReview?.reviewRaisedForHuman === true && sheetReview;
+    const rule = raiseOutstanding
+      ? { baseline: undefined as boolean | undefined, humanOwns: true, drift: false, write: () => ({}) }
+      : reviewRule(
       sheetReview,
       stForReview?.lastWrittenHumanReview,
       typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
@@ -349,13 +285,12 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
           cells: {
             'Repo Status': item.status,
             'Last Synced': now,
-            // Tick the box and pin BOTH baselines to false. Every ownership rule then reads
-            // the ticked box as "a person put this here", so we never recompute it away - and
-            // because the two baselines agree with each other it is not mistaken for drift
-            // either. Leaving them merely untouched was not enough: in six of the eighteen
-            // reachable baseline states they already said true, and the warning cleared itself
-            // on the next run. A warning that clears itself is no warning at all.
-            ...(somebodyDisagrees ? { 'Human Review': true, 'Repo Review': false } : {}),
+            // Tick the box and record separately that WE raised it (see `reviewRaisedForHuman`
+            // in the state file). Trying to express this by moving the baselines could not work:
+            // one boolean has to say both "the box is ticked" and "who ticked it", so pinning
+            // them false made the warning durable but then re-ticked the box after every human
+            // clear on any item the model itself wants reviewed.
+            ...(somebodyDisagrees ? { 'Human Review': true } : {}),
           },
           reviewRaisedForHuman: somebodyDisagrees,
           reasons: somebodyDisagrees
@@ -391,9 +326,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       continue;
     }
 
-    const reasons: string[] = adoptedFrom
-      ? [`adopted the existing row for ${adoptedFrom}: this item's Item ID was widened, so its identity was rewritten in place and your columns kept`]
-      : ['repo-controlled fields changed'];
+    const reasons: string[] = ['repo-controlled fields changed'];
     if (wasMissing) reasons.push('item reappeared in the repository');
 
     // A conflict is a live disagreement between the two Status values - nothing else.
@@ -578,18 +511,21 @@ export async function applyPlan(plan: SyncPlan, target: SheetTarget, state: Sync
   return { created, updated };
 }
 
+/** Was a raise outstanding on this row, and has nobody dismissed it yet? */
+function raiseStillStanding(state: SyncState, c: PlannedChange, rowId: number): boolean {
+  const prev = state.items[c.item.itemId];
+  if (!prev || prev.rowId !== rowId || prev.reviewRaisedForHuman !== true) return false;
+  // A write that unticks the box is us agreeing the raise is over; anything else leaves it up.
+  return (c.cells as CellValues)['Human Review'] !== false;
+}
+
 function remember(state: SyncState, c: PlannedChange, rowId: number, now: string): void {
   // What WE last wrote to the checkbox, carried forward when this write deliberately left the
   // cell alone. It must come from the entry describing THIS physical row: an entry under either
   // id can belong to a row an earlier split created and a person has since deleted, and reading
   // that one put a stale value straight back after planning had correctly ignored it.
-  const carried = [state.items[c.item.itemId], ...(c.item.legacyItemIds ?? []).map((l) => state.items[l])]
-    .find((e) => e !== undefined && e.rowId === rowId)?.lastWrittenHumanReview;
-  // An adopted row carried its cache entry over under the old ID; drop it so the file does not
-  // keep a second, stale record of the same row forever.
-  for (const legacy of c.item.legacyItemIds ?? []) {
-    if (legacy !== c.item.itemId) delete state.items[legacy];
-  }
+  const prev = state.items[c.item.itemId];
+  const carried = prev !== undefined && prev.rowId === rowId ? prev.lastWrittenHumanReview : undefined;
   state.items[c.item.itemId] = {
     rowId,
     fingerprint: c.item.fingerprint,
@@ -602,8 +538,9 @@ function remember(state: SyncState, c: PlannedChange, rowId: number, now: string
     // is the adopt case - the baseline moves, the visible checkbox does not.
     // A tick we raised for a person is not ours: leaving the baseline where it was makes the
     // sheet and the baseline disagree, which is exactly how the ownership rule records "theirs".
+    reviewRaisedForHuman: c.reviewRaisedForHuman ? true : (raiseStillStanding(state, c, rowId) || undefined),
     lastWrittenHumanReview: c.reviewRaisedForHuman
-      ? false
+      ? carried
       : (c.cells as CellValues)['Human Review'] !== undefined
       ? (c.cells as CellValues)['Human Review'] === true
       : (c.cells as CellValues)['Repo Review'] !== undefined
