@@ -12,11 +12,12 @@ export interface SheetTarget {
   /**
    * Did a person move `Human Review` on this row after the moment we last wrote it?
    *
-   * Optional, because it costs a request per row and only the real Smartsheet target can
-   * answer it. `undefined` means "cannot tell", which callers must treat as "assume they did
-   * not" - the in-memory target used by tests and dry runs returns exactly that.
+   * Optional, because it costs a request per row and only the real Smartsheet target can answer
+   * it. A target that does not implement it at all is saying "there is no history here" - the
+   * caller falls back to comparing snapshots. `'unknown'` is different and much stronger: it
+   * means the history EXISTS and could not be read, so the caller must not clear anything.
    */
-  humanMovedReviewSince?(rowId: number, sinceIso: string): Promise<boolean | undefined>;
+  humanMovedReviewSince?(rowId: number, sinceIso: string): Promise<boolean | 'unknown'>;
   readonly sheetId: string;
   readonly columnTitles: string[];
   /** id -> row (cells keyed by column title) */

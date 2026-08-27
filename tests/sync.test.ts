@@ -1569,16 +1569,62 @@ describe('round-24: closing the snapshot gap with cell history', () => {
     expect(asked).toBe(0);
   });
 
-  it('keeps the value when the history cannot be read at all (R24-01)', async () => {
-    // "Cannot tell" has to mean "leave it alone": the in-memory target and any failed request
-    // both answer undefined, and neither may cost somebody their decision.
+  it('keeps the value when the history exists but cannot be read (R25-01)', async () => {
+    // My first version of this asserted the opposite - that a failed read carries on and clears
+    // the box - which contradicted what the README promised. A target that has no history at
+    // all is saying "there is nothing to consult here"; a target that HAS history and could not
+    // read it is saying something much stronger, and clearing on that answer is how a request
+    // hiccup costs somebody their decision.
     await run(normalize([risk()]), T1);
     const row = target.rows[0];
-    (target as unknown as { humanMovedReviewSince: () => Promise<undefined> })
-      .humanMovedReviewSince = async () => undefined;
+    (target as unknown as { humanMovedReviewSince: () => Promise<'unknown'> })
+      .humanMovedReviewSince = async () => 'unknown';
     const plain = items(ev('src/auth/session.js', 'tidied up'))[0];
     const plan = planSync([{ ...plain, itemId: normalize([risk()])[0].itemId }], await target.readRows(), state, T2);
     await applyPlan(plan, target, state, T2);
-    expect(row.cells['Human Review']).toBe(false);          // undefined means "carry on"
+    expect(row.cells['Human Review']).toBe(true);           // untouched
+    expect(row.cells['Review Owner']).toBe('human');        // and handed over
+  });
+
+  it('falls back to comparing snapshots when there is no history to consult (R25-01)', async () => {
+    // The in-memory target does not implement the capability at all. That must stay ordinary
+    // behaviour, or every dry run and every test would freeze its flags forever.
+    await run(normalize([risk()]), T1);
+    const row = target.rows[0];
+    const plain = items(ev('src/auth/session.js', 'tidied up'))[0];
+    const plan = planSync([{ ...plain, itemId: normalize([risk()])[0].itemId }], await target.readRows(), state, T2);
+    await applyPlan(plan, target, state, T2);
+    expect(row.cells['Human Review']).toBe(false);
+  });
+});
+
+describe('round-25: every destructive checkbox write is marked (R25-02)', () => {
+  const check = (c: boolean) => ({
+    extractor: 'readme-checklist',
+    sourceType: c ? 'Markdown checklist (checked)' : 'Markdown checklist (unchecked)',
+    path: 'README.md', line: 5, section: 'Roadmap', excerpt: 'ship it',
+  } as RawEvidence);
+
+  it('marks a clear made by resolving a conflict, not only the ordinary update path', async () => {
+    // `clearsReview` was stamped by hand at ONE call site and therefore missed a quarter of the
+    // writes that can clear a ticked box - conflict resolution among them. It is derived from
+    // the finished plan now, so the property holds by construction rather than by remembering.
+    await run(normalize([check(false)]), T1);
+    const row = target.rows[0];
+    row.cells['Status'] = 'Blocked';
+    await run(normalize([check(true)]), T2);               // conflict: we tick the box
+    expect(row.cells['Human Review']).toBe(true);
+
+    row.cells['Status'] = 'Done';                          // resolved, so the flag would clear
+    const plan = planSync(normalize([check(true)]), await target.readRows(), state, T3);
+    const clearing = plan.changes.filter((c) => (c.cells as Record<string, unknown>)['Human Review'] === false);
+    expect(clearing).toHaveLength(1);
+    expect(clearing[0].clearsReview, 'a clear that would go unchecked').toBe(true);
+  });
+
+  it('never marks a write that leaves the box alone or ticks it', async () => {
+    await run(items(ev('src/a.js', 'one')), T1);
+    const p = await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
+    for (const c of p.changes) expect(c.clearsReview).not.toBe(true);
   });
 });

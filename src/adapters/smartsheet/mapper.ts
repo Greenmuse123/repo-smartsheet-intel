@@ -62,8 +62,12 @@ export function sharedCells(status: Status): CellValues {
  * move together: writing `Human Review` without `Repo Review` strands our own tick, and
  * writing `Repo Review` over a person's tick relabels their decision as ours.
  */
-export function reviewCells(humanReview: boolean): CellValues {
-  return { 'Human Review': humanReview, 'Repo Review': humanReview, 'Review Owner': 'tool' };
+export function reviewCells(humanReview: boolean, now: string): CellValues {
+  // `Review Written At` is the boundary for reading the checkbox's history. It has to be the
+  // moment WE wrote the checkbox - not the moment of the last sync, which moves for reasons
+  // that have nothing to do with this cell and would make our own write look like somebody
+  // else's a moment later.
+  return { 'Human Review': humanReview, 'Repo Review': humanReview, 'Review Owner': 'tool', 'Review Written At': now };
 }
 
 /** Records that the person owns the checkbox from now on, without touching the checkbox. */

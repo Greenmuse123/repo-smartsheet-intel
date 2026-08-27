@@ -198,18 +198,21 @@ describe('the tool locks its own bookkeeping columns (round-24)', () => {
     // A locked column stops Editors changing it, which is the difference between asking people
     // not to touch the tool's notes and them not being able to by accident. Owners and Admins
     // can still unlock, so it is a guard rail rather than a boundary - and the README says so.
+    // Assert the RULE, not a hand-picked list: seven of the tool's own columns were left
+    // unlocked when the list was written by hand, while the docs claimed all of them were.
     const body = sheetCreateBody('T');
     const locked = new Set(body.columns.filter((c) => c.locked === true).map((c) => c.title));
-    for (const title of ['Item ID', 'Repo Status', 'Repo Review', 'Repo Path', 'Review Owner', 'Repo Fingerprint', 'Sync Status']) {
-      expect(locked.has(title), title).toBe(true);
-    }
+    const repoOwned = COLUMNS.filter((c) => c.writtenBy === 'repo').map((c) => c.title);
+    expect(repoOwned.length).toBeGreaterThan(10);
+    for (const title of repoOwned) expect(locked.has(title), title).toBe(true);
+    expect(locked.size).toBe(repoOwned.length);            // and nothing else is locked
   });
 
   it('leaves the columns people are meant to fill in unlocked', () => {
     const body = sheetCreateBody('T');
     const locked = new Set(body.columns.filter((c) => c.locked === true).map((c) => c.title));
-    for (const title of ['Status', 'Human Review', 'Priority', 'Owner', 'Due Date', 'Management Notes']) {
-      expect(locked.has(title), title).toBe(false);
+    for (const c of COLUMNS.filter((x) => x.writtenBy !== 'repo')) {
+      expect(locked.has(c.title), c.title).toBe(false);
     }
   });
 });

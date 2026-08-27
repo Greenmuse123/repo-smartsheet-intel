@@ -94,22 +94,30 @@ export class SmartsheetTarget implements SheetTarget {
    * sync apart cannot see a person clearing the box and ticking it again in between - the sheet
    * ends up holding exactly the value we left there. The history can see it.
    */
-  async humanMovedReviewSince(rowId: number, sinceIso: string): Promise<boolean | undefined> {
+  async humanMovedReviewSince(rowId: number, sinceIso: string): Promise<boolean | 'unknown'> {
     const columnId = this.byTitle.get('Human Review');
-    if (columnId === undefined) return undefined;
+    if (columnId === undefined) return 'unknown';
     const since = Date.parse(sinceIso);
-    if (Number.isNaN(since)) return undefined;
+    if (Number.isNaN(since)) return 'unknown';
     try {
-      const history = await this.client.cellHistory(this.sheetId, rowId, columnId);
+      const [history, me] = await Promise.all([
+        this.client.cellHistory(this.sheetId, rowId, columnId),
+        this.client.currentUserEmail(),
+      ]);
       return history.some((h) => {
         const at = h.modifiedAt ? Date.parse(h.modifiedAt) : NaN;
-        return Number.isFinite(at) && at > since;
+        if (!Number.isFinite(at) || at <= since) return false;
+        // Our own writes appear in the history too. The boundary is the moment we last wrote
+        // this cell, so anything after it should be somebody else - but clocks and retries make
+        // that a thin guarantee, and the account that owns the token is a much better one.
+        const who = h.modifiedBy?.email?.toLowerCase();
+        return !(me && who && who === me);
       });
     } catch (e) {
-      // Never let a bookkeeping question fail a sync. Not knowing is the safe answer: the
-      // caller keeps the person's value rather than clearing it.
-      log.warn(`Could not read the Human Review history for row ${rowId} (${(e as Error).message}); leaving that checkbox alone.`);
-      return undefined;
+      // Never let a bookkeeping question fail a sync - but never let it quietly cost somebody
+      // their decision either. Saying "unknown" makes the caller keep what it found.
+      log.warn(`Could not read the Human Review history for row ${rowId} (${(e as Error).message}); leaving that checkbox exactly as it is.`);
+      return 'unknown';
     }
   }
 

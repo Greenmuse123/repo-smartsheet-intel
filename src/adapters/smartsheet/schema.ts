@@ -13,18 +13,11 @@ export interface ColumnDef {
   options?: string[];
   writtenBy: WrittenBy;
   technical?: boolean; // hide by default in the main view
-  /**
-   * Locked columns are the tool's own bookkeeping. Smartsheet stops Editors changing a locked
-   * column, which is the difference between "we ask people not to touch this" and "people
-   * cannot touch this by accident". Owners and Admins can still unlock and edit, so this is a
-   * guard rail rather than a boundary - see the note in README.
-   */
-  locked?: boolean;
   purpose: string;
 }
 
 export const COLUMNS: ColumnDef[] = [
-  { title: 'Item ID', type: 'TEXT_NUMBER', primary: true, writtenBy: 'repo', purpose: 'Stable key linking the row to its repository evidence. Never edit.', locked: true },
+  { title: 'Item ID', type: 'TEXT_NUMBER', primary: true, writtenBy: 'repo', purpose: 'Stable key linking the row to its repository evidence. Never edit.' },
   { title: 'Item', type: 'TEXT_NUMBER', writtenBy: 'repo', purpose: 'Short title, in the words found in the repository.' },
   { title: 'Type', type: 'PICKLIST', options: [...ITEM_TYPES], writtenBy: 'repo', purpose: 'Feature, Bug, Task, Technical Debt, Documentation, Test, Dependency, Risk, Decision, Milestone, Release, or Unknown.' },
   { title: 'Status', type: 'PICKLIST', options: [...STATUSES], writtenBy: 'shared', purpose: 'Current state. Repo updates it unless a human changed it; disagreements become Conflict.' },
@@ -32,23 +25,24 @@ export const COLUMNS: ColumnDef[] = [
   { title: 'Owner', type: 'CONTACT_LIST', writtenBy: 'human', purpose: 'Who owns it. Seeded from CODEOWNERS or TODO(name) on creation; never overwritten afterwards.' },
   { title: 'Component', type: 'TEXT_NUMBER', writtenBy: 'repo', purpose: 'Top-level folder or package the item belongs to.' },
   { title: 'Description', type: 'TEXT_NUMBER', writtenBy: 'repo', purpose: 'What the repository says, in context. AI summaries are labeled.' },
-  { title: 'Source', type: 'TEXT_NUMBER', writtenBy: 'repo', purpose: 'file:line and evidence type, so anyone can verify.', locked: true },
+  { title: 'Source', type: 'TEXT_NUMBER', writtenBy: 'repo', purpose: 'file:line and evidence type, so anyone can verify.' },
   { title: 'Dependency', type: 'TEXT_NUMBER', writtenBy: 'human', purpose: 'What this depends on. Seeded only when literally stated.' },
   { title: 'Milestone', type: 'TEXT_NUMBER', writtenBy: 'human', purpose: 'Release/version or roadmap heading when literally present.' },
   { title: 'Due Date', type: 'DATE', writtenBy: 'human', purpose: 'Never set by the repo. Humans only.' },
   { title: 'Last Repo Update', type: 'DATE', writtenBy: 'repo', purpose: 'Date of the last commit that touched the source file.' },
   { title: 'Confidence', type: 'PICKLIST', options: [...CONFIDENCES], writtenBy: 'repo', purpose: 'High = literal; Medium = inferred from several signals; Low = suggestion.' },
   { title: 'Human Review', type: 'CHECKBOX', writtenBy: 'shared', purpose: 'Checked when a person should look. Clear it when done.' },
-  { title: 'Sync Status', type: 'PICKLIST', options: [...SYNC_STATUSES], writtenBy: 'repo', purpose: 'New / Synced / Updated / Conflict / Missing in Repo / Conflict (missing in repo) / Error.', locked: true },
+  { title: 'Sync Status', type: 'PICKLIST', options: [...SYNC_STATUSES], writtenBy: 'repo', purpose: 'New / Synced / Updated / Conflict / Missing in Repo / Conflict (missing in repo) / Error.' },
   { title: 'AI Suggestion', type: 'TEXT_NUMBER', writtenBy: 'repo', technical: true, purpose: 'Interpretation, never fact. Heuristics and optional LLM notes.' },
-  { title: 'Repo Status', type: 'PICKLIST', options: [...STATUSES], writtenBy: 'repo', technical: true, purpose: 'What the repository currently says the status is (basis for conflict detection).', locked: true },
-  { title: 'Review Owner', type: 'TEXT_NUMBER', writtenBy: 'repo', technical: true, purpose: 'Who last set Human Review - "tool" or "human". A checkbox can say what the value is but not who chose it, and that is the difference between a stale flag and a lost decision.', locked: true },
-  { title: 'Repo Path', type: 'TEXT_NUMBER', writtenBy: 'repo', technical: true, purpose: 'The exact repository path this row is for. Machine-readable twin of Source, which is written for people to read.', locked: true },
-  { title: 'Repo Review', type: 'CHECKBOX', writtenBy: 'repo', technical: true, purpose: 'The Human Review value this tool last wrote. Lets a person\'s own tick be told from ours without a local state file.', locked: true },
-  { title: 'Source Commit', type: 'TEXT_NUMBER', writtenBy: 'repo', technical: true, purpose: 'Short commit SHA of the evidence.', locked: true },
+  { title: 'Repo Status', type: 'PICKLIST', options: [...STATUSES], writtenBy: 'repo', technical: true, purpose: 'What the repository currently says the status is (basis for conflict detection).' },
+  { title: 'Review Written At', type: 'TEXT_NUMBER', writtenBy: 'repo', technical: true, purpose: 'When this tool last wrote Human Review. The boundary for reading that cell\'s history: anything after this was somebody else.' },
+  { title: 'Review Owner', type: 'TEXT_NUMBER', writtenBy: 'repo', technical: true, purpose: 'Who last set Human Review - "tool" or "human". A checkbox can say what the value is but not who chose it, and that is the difference between a stale flag and a lost decision.' },
+  { title: 'Repo Path', type: 'TEXT_NUMBER', writtenBy: 'repo', technical: true, purpose: 'The exact repository path this row is for. Machine-readable twin of Source, which is written for people to read.' },
+  { title: 'Repo Review', type: 'CHECKBOX', writtenBy: 'repo', technical: true, purpose: 'The Human Review value this tool last wrote. Lets a person\'s own tick be told from ours without a local state file.' },
+  { title: 'Source Commit', type: 'TEXT_NUMBER', writtenBy: 'repo', technical: true, purpose: 'Short commit SHA of the evidence.' },
   { title: 'Management Notes', type: 'TEXT_NUMBER', writtenBy: 'human', purpose: 'Free text for PMs. Never touched by sync.' },
-  { title: 'Last Synced', type: 'TEXT_NUMBER', writtenBy: 'repo', technical: true, purpose: 'Timestamp of the last sync that wrote this row.', locked: true },
-  { title: 'Repo Fingerprint', type: 'TEXT_NUMBER', writtenBy: 'repo', technical: true, purpose: 'Hash of repo-controlled fields; lets the sync rebuild its memory from the sheet alone.', locked: true },
+  { title: 'Last Synced', type: 'TEXT_NUMBER', writtenBy: 'repo', technical: true, purpose: 'Timestamp of the last sync that wrote this row.' },
+  { title: 'Repo Fingerprint', type: 'TEXT_NUMBER', writtenBy: 'repo', technical: true, purpose: 'Hash of repo-controlled fields; lets the sync rebuild its memory from the sheet alone.' },
 ];
 
 export const COLUMN_TITLES = COLUMNS.map((c) => c.title);
@@ -63,7 +57,12 @@ export function sheetCreateBody(name: string): { name: string; columns: Array<Re
       type: c.type,
       ...(c.primary ? { primary: true } : {}),
       ...(c.options ? { options: c.options } : {}),
-      ...(c.locked ? { locked: true } : {}),
+      // Every column the repository owns is locked. Smartsheet stops Editors changing a locked
+      // column, which is the difference between asking people not to touch the tool's own
+      // record and their not being able to by accident. Owners and Admins can still unlock, so
+      // it is a guard rail rather than a boundary - the README says exactly that. Columns a
+      // person is meant to fill in are deliberately left alone.
+      ...(c.writtenBy === 'repo' ? { locked: true } : {}),
     })),
   };
 }

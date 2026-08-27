@@ -20,7 +20,7 @@ function q(v: unknown): string {
 export function csvFor(items: ProjectItem[], now: string): string {
   const lines = [COLUMN_TITLES.map(q).join(',')];
   for (const it of items) {
-    const cells = { ...repoCells(it, 'New', now), ...humanSeedCells(it), ...sharedCells(it.status), ...reviewCells(it.humanReviewRequired) };
+    const cells = { ...repoCells(it, 'New', now), ...humanSeedCells(it), ...sharedCells(it.status), ...reviewCells(it.humanReviewRequired, now) };
     lines.push(COLUMN_TITLES.map((t) => q(cells[t])).join(','));
   }
   return '\uFEFF' + lines.join('\r\n') + '\r\n';

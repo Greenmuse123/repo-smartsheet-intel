@@ -34,7 +34,7 @@ import { log } from '../log/logger.js';
  * - Otherwise: the box is ours to recompute only if the sheet still agrees with the baseline.
  *   If it differs, a person moved it - in EITHER direction - and it is theirs from then on.
  */
-function reviewRule(sheetReview: boolean, cache: boolean | undefined, mirror: boolean | undefined, owner: string): {
+function reviewRule(sheetReview: boolean, cache: boolean | undefined, mirror: boolean | undefined, owner: string, now: string): {
   baseline: boolean | undefined;
   humanOwns: boolean;
   /** True when the two records of OUR value disagree and the mirror is being re-pointed. */
@@ -67,7 +67,18 @@ function reviewRule(sheetReview: boolean, cache: boolean | undefined, mirror: bo
   // When the inference says a person moved it, WRITE that down. Otherwise the conclusion has to
   // be re-derived on every future run from values that cannot express it, and one lost cache
   // turns their decision back into ours.
-  return { baseline, humanOwns, drift: false, write: (want) => (humanOwns ? handReviewToHuman() : reviewCells(want)) };
+  return { baseline, humanOwns, drift: false, write: (want) => (humanOwns ? handReviewToHuman() : reviewCells(want, now)) };
+}
+
+/**
+ * Do these cells actually change anything on the row?
+ *
+ * Bookkeeping stamps are excluded: they move on every write by definition, so counting them
+ * would make every repair look necessary and re-plan itself forever.
+ */
+function changesAnything(cells: CellValues, row: TargetRow): boolean {
+  const STAMPS = new Set(['Last Synced', 'Review Written At']);
+  return Object.entries(cells).some(([k, v]) => !STAMPS.has(k) && row.cells[k] !== v);
 }
 
 export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncState, now: string): SyncPlan {
@@ -142,7 +153,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       continue;
     }
     if (!row) {
-      changes.push({ action: 'create', item, cells: { ...repoCells(item, 'New', now), ...humanSeedCells(item), ...sharedCells(item.status), ...reviewCells(item.humanReviewRequired) }, reasons: ['not in sheet yet'] });
+      changes.push({ action: 'create', item, cells: { ...repoCells(item, 'New', now), ...humanSeedCells(item), ...sharedCells(item.status), ...reviewCells(item.humanReviewRequired, now) }, reasons: ['not in sheet yet'] });
       continue;
     }
     // Carry the cached baselines across the rename, or adoption would look like a row we have
@@ -226,6 +237,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       stForReview?.lastWrittenHumanReview,
       typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
       String(row.cells['Review Owner'] ?? ''),
+      now,
     );
     const humanOwnsReview = rule.humanOwns;
     const writeReview = rule.write;
@@ -328,7 +340,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
             // cannot say both what the value is and who set it.
             // Tick it and hand it over in the same write. `Review Owner` is what makes the
             // hand-over outlive the local cache; the state flag is now only a fast path.
-            ...(somebodyDisagrees ? { 'Human Review': true, 'Repo Review': true, 'Review Owner': 'human' } : {}),
+            ...(somebodyDisagrees ? { 'Human Review': true, 'Repo Review': true, 'Review Owner': 'human', 'Review Written At': now } : {}),
           },
           reviewRaisedForHuman: somebodyDisagrees,
           reasons: somebodyDisagrees
@@ -366,7 +378,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       // Drift must be repaired even when the mirror ALREADY shows the visible value: in that
       // case the write changes no cell, but it is the only thing that makes `remember()` run
       // and bring the local cache back into line. Without it the two records disagree forever.
-      const reviewChanges = rule.drift || Object.entries(pendingReview).some(([k, v]) => row.cells[k] !== v);
+      const reviewChanges = rule.drift || changesAnything(pendingReview, row);
       if (reviewChanges) {
         // ONLY the review cells. `repoCells` would rewrite `Repo Status` and `Repo Fingerprint`
         // - the merge baselines - for what is a checkbox repair, and on a row whose Status
@@ -430,12 +442,9 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       else if (repoChangedStatus) reasons.push(`status ${lastWrittenStatus || '(none)'} → ${item.status}`);
     }
 
-    const cells: CellValues = { ...repoCells(item, syncStatus, now), ...sharedCells(status), ...writeReview(humanReview) };
     changes.push({
-      action, item, rowId: row.rowId, cells, reasons,
-      // The one kind of write that can destroy a decision: clearing a box that is currently
-      // ticked. `applyPlan` checks the cell's history before doing it.
-      clearsReview: cells['Human Review'] === false && sheetReview,
+      action, item, rowId: row.rowId, reasons,
+      cells: { ...repoCells(item, syncStatus, now), ...sharedCells(status), ...writeReview(humanReview) },
     });
   }
 
@@ -463,6 +472,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
           state.items[id]?.lastWrittenHumanReview,
           typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
           String(row.cells['Review Owner'] ?? ''),
+          now,
         );
         changes.push({
           action: 'missing',
@@ -487,6 +497,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
         state.items[id]?.lastWrittenHumanReview,
         typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
         String(row.cells['Review Owner'] ?? ''),
+        now,
       );
       // Repair drift, and - just as importantly - write down a human move when we see one. This
       // pass concluded a person had taken the checkbox and then said nothing, so the conclusion
@@ -496,7 +507,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
         ? handReviewToHuman()
         : {};
       const pending = { ...(rule.drift ? rule.write(true) : {}), ...handover };
-      const differs = rule.drift || Object.entries(pending).some(([k, v]) => row.cells[k] !== v);
+      const differs = rule.drift || changesAnything(pending, row);
       if (differs) {
         changes.push({
           action: 'missing',
@@ -523,9 +534,21 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       state.items[id]?.lastWrittenHumanReview,
       typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
       String(row.cells['Review Owner'] ?? ''),
+      now,
     ).write(true);
     changes.push({ action: 'missing', item: ghost, rowId: row.rowId, cells: { 'Sync Status': label, ...reviewWrite, 'Last Synced': now }, reasons: [wasConflict ? 'item no longer found in repository; the unresolved conflict is kept too' : 'item no longer found in repository; row kept for a human to close or merge'] });
     }
+  }
+
+  // Mark every write that would clear a ticked box, wherever in this function it was created.
+  // Stamping this by hand at one call site covered a quarter of the paths that can clear one:
+  // conflict resolution, an unchanged missing return and absent-item resolution all clear too.
+  // Deriving it from the plan closes the class rather than one instance of it.
+  const rowsById = new Map(rows.map((r) => [r.rowId, r]));
+  for (const c of changes) {
+    if (c.rowId === undefined) continue;
+    if ((c.cells as CellValues)['Human Review'] !== false) continue;
+    if (rowsById.get(c.rowId)?.cells['Human Review'] === true) c.clearsReview = true;
   }
 
   const counts = { create: 0, update: 0, unchanged: 0, conflict: 0, missing: 0 };
@@ -553,6 +576,9 @@ export function describePlan(plan: SyncPlan, sheetRowCount: number): string[] {
 }
 
 export async function applyPlan(plan: SyncPlan, target: SheetTarget, state: SyncState, now: string): Promise<{ created: number; updated: number }> {
+  // The sheet as it stands before this plan is applied, so a change can be checked against the
+  // row it targets.
+  const rowsBefore = new Map((await target.readRows()).map((r) => [r.rowId, r]));
   const creates = plan.changes.filter((c) => c.action === 'create');
   const updates = plan.changes.filter((c) => c.action === 'update' || c.action === 'conflict' || c.action === 'missing');
 
@@ -569,10 +595,17 @@ export async function applyPlan(plan: SyncPlan, target: SheetTarget, state: Sync
   // ONLY about a box we are about to clear, because Smartsheet rate-limits history heavily.
   for (const c of updates) {
     if (!c.clearsReview || !target.humanMovedReviewSince || c.rowId === undefined) continue;
-    const since = state.items[c.item.itemId]?.lastSyncedAt;
+    // The boundary is when we last wrote THIS cell, which the sheet records itself. The last
+    // sync time was neither: it lives only in a local file, and it moves for reasons that have
+    // nothing to do with this checkbox - so our own write could look like somebody else's a
+    // moment later, and losing the file removed the boundary altogether.
+    const since = String(rowsBefore.get(c.rowId)?.cells['Review Written At'] ?? '')
+      || state.items[c.item.itemId]?.lastSyncedAt;
     if (!since) continue;
     const moved = await target.humanMovedReviewSince(c.rowId, since);
-    if (moved !== true) continue;
+    if (moved === false) continue;
+    // `true` means somebody moved it; `'unknown'` means the history exists and could not be
+    // read. Neither is a licence to clear the box.
     // Somebody did move it. Keep what they left and record that the box is theirs from now on.
     delete (c.cells as CellValues)['Human Review'];
     delete (c.cells as CellValues)['Repo Review'];

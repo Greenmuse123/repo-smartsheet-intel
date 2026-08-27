@@ -91,6 +91,20 @@ export class SmartsheetClient {
     return res.data ?? [];
   }
 
+  private meEmail?: string | null;
+
+  /** The account this token belongs to, so its own edits can be told from a person's. */
+  async currentUserEmail(): Promise<string | undefined> {
+    if (this.meEmail !== undefined) return this.meEmail ?? undefined;
+    try {
+      const me = await this.request<{ email?: string }>('GET', '/users/me');
+      this.meEmail = me.email?.toLowerCase() ?? null;
+    } catch {
+      this.meEmail = null; // not fatal: the timestamp boundary still applies
+    }
+    return this.meEmail ?? undefined;
+  }
+
   async addRows(sheetId: string | number, rows: RowToAdd[], batchSize = 400): Promise<number[]> {
     const ids: number[] = [];
     for (const batch of chunk(rows, batchSize)) {

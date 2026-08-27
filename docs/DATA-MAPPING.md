@@ -4,8 +4,10 @@ Source of truth: `src/adapters/smartsheet/schema.ts` (the sheet is created from 
 
 | # | Column | Smartsheet type | Purpose | Source in repository | AI/sync may populate | Humans may edit |
 |---|---|---|---|---|---|---|
-> **Locked columns.** Every column the tool writes is created locked, so Editors cannot change
-> the tool's own record of what it did. Owners and Admins can still unlock one.
+> **Locked columns.** Every column the repository owns is created locked, so Editors cannot
+> change the tool's own record of what it did. The columns you fill in - Status, Human Review,
+> Priority, Owner, Due Date, Dependency, Milestone, Management Notes - are left unlocked. Owners
+> and Admins can still unlock any column.
 >
 > **Item ID length changed.** The digest is 12 hex characters (48 bits); it was 8. A sheet
 > written by an older build is NOT matched up automatically: each item gets a fresh row and the
