@@ -365,3 +365,41 @@ describe('the missing state must not manufacture conflicts (round-4 review regre
     expect(target.rows[0].cells['Human Review']).toBe(false);  // ours, so ours to clear
   });
 });
+
+
+describe('losing state.json must not lose a human decision (round-5 self-review)', () => {
+  it('keeps a human Human Review tick when there is no baseline to compare against', async () => {
+    // The three-way checkbox merge needs to know what WE last wrote. On a fresh clone there is
+    // no state.json, so recomputing from the item would silently clear a person's tick on the
+    // very first run - exactly the kind of silent human-input loss this tool exists to prevent.
+    await run(items(ev('src/a.js', 'one')), T1);
+    target.rows[0].cells['Human Review'] = true;         // a person ticks it
+
+    state = { version: 1, sheetId: 'sheet-1', items: {} }; // fresh clone: baseline is gone
+    await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
+    expect(target.rows[0].cells['Sync Status']).toBe('Updated');
+    expect(target.rows[0].cells['Human Review']).toBe(true);
+  });
+
+  it('still clears its own flag with no baseline when the row carries one of our markers', async () => {
+    // A row labelled Conflict is one WE ticked, so with no baseline it is still ours to clear
+    // once the human has made the sheet agree. Otherwise a lost state file would strand every
+    // resolved conflict in the "needs my attention" filter forever.
+    const check = (state: 'x' | ' ', section = 'Roadmap') => ({
+      extractor: 'readme-checklist',
+      sourceType: state === 'x' ? 'Markdown checklist (checked)' : 'Markdown checklist (unchecked)',
+      path: 'README.md', line: 5, section, excerpt: 'ship it',
+    } as RawEvidence);
+
+    await run(normalize([check(' ')]), T1);
+    target.rows[0].cells['Status'] = 'Blocked';
+    await run(normalize([check('x')]), T2);
+    expect(target.rows[0].cells['Sync Status']).toBe('Conflict');
+    expect(target.rows[0].cells['Human Review']).toBe(true);
+
+    state = { version: 1, sheetId: 'sheet-1', items: {} }; // lose the state file
+    target.rows[0].cells['Status'] = 'Done';              // human resolves it
+    await run(normalize([check('x', 'Known issues')]), T3);
+    expect(target.rows[0].cells['Human Review']).toBe(false);
+  });
+});

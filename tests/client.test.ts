@@ -157,3 +157,30 @@ describe('error messages point at the real cause (round-3 review regressions)', 
     expect(calls).toHaveLength(1);
   });
 });
+
+
+describe('schema drift must not fail a whole batch (round-5 self-review)', () => {
+  it('sends dropdown values with strict:false so an older sheet still accepts them', async () => {
+    // Smartsheet parses PICKLIST cells strictly by default and this client sends
+    // allowPartialSuccess=false, so one unrecognised option fails the ENTIRE batch. A sheet
+    // created before a new Sync Status value existed would break completely on the next sync.
+    const columns = COLUMNS.map((c, i) => ({ id: 100 + i, title: c.title, type: c.type }));
+    const { fetchImpl, calls } = fakeFetch([
+      { status: 200, body: { id: 1, name: 's', columns, rows: [] } },
+      { status: 200, body: { result: [{ id: 5001 }] } },
+    ]);
+    const client = new SmartsheetClient({ token: 't', fetchImpl, sleep: noSleep });
+    const target = new SmartsheetTarget(client, '1');
+    await target.readRows();
+    await target.addRows([{ 'Item ID': 'RSI-X-1', 'Sync Status': 'Conflict (missing in repo)', 'Owner': '@team-b' }]);
+
+    const sent = calls[1].body[0].cells as Array<{ columnId: number; value: string; strict?: boolean }>;
+    const byId = new Map(columns.map((c) => [c.id, c.title]));
+    const syncCell = sent.find((c) => byId.get(c.columnId) === 'Sync Status')!;
+    const ownerCell = sent.find((c) => byId.get(c.columnId) === 'Owner')!;
+    const idCell = sent.find((c) => byId.get(c.columnId) === 'Item ID')!;
+    expect(syncCell).toMatchObject({ value: 'Conflict (missing in repo)', strict: false });
+    expect(ownerCell).toMatchObject({ value: '@team-b', strict: false });
+    expect(idCell.strict).toBeUndefined(); // plain text columns keep the default
+  });
+});

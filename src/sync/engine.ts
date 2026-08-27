@@ -68,8 +68,21 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // sheet against what WE last wrote. If they differ, a person deliberately (un)checked it,
     // and that decision outranks our recomputation.
     const sheetReview = row.cells['Human Review'] === true;
-    const humanChangedReview = st?.lastWrittenHumanReview !== undefined && sheetReview !== st.lastWrittenHumanReview;
-    const reviewAfterUpdate = humanChangedReview ? sheetReview : item.humanReviewRequired;
+    const reviewBaseline = st?.lastWrittenHumanReview;
+    let reviewAfterUpdate: boolean;
+    if (reviewBaseline !== undefined) {
+      // We know what we last wrote: if the sheet differs, a person changed it and wins.
+      reviewAfterUpdate = sheetReview !== reviewBaseline ? sheetReview : item.humanReviewRequired;
+    } else if (alreadyConflict || wasMissing) {
+      // No baseline (fresh clone, lost state). The row is flagged Conflict or Missing, which
+      // are the states WE tick the box in, so it is ours to recompute.
+      reviewAfterUpdate = item.humanReviewRequired;
+    } else {
+      // No baseline and no flag of ours to explain the tick - so assume a person put it there.
+      // Leaving a stale flag costs someone one glance; clearing a real one loses a decision
+      // silently, and this tool's whole promise is that human input survives.
+      reviewAfterUpdate = sheetReview || item.humanReviewRequired;
+    }
 
     if (!repoChanged) {
       // The repository has not moved. Two things can still legitimately need a write:

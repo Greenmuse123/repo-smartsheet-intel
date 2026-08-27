@@ -10,6 +10,9 @@ import { log } from '../../log/logger.js';
 /** Columns Smartsheet parses as contacts. Handles like `@team-b` are not valid emails. */
 const CONTACT_COLUMNS = new Set(COLUMNS.filter((c) => c.type === 'CONTACT_LIST').map((c) => c.title));
 
+/** Dropdown columns. See `toCells` for why these opt out of strict parsing. */
+const PICKLIST_COLUMNS = new Set(COLUMNS.filter((c) => c.type === 'PICKLIST').map((c) => c.title));
+
 /**
  * Without these the sheet has no stable identity and every run would re-create every row.
  * `Repo Status` is here too: it is the sheet-side record of the value WE last wrote, which is
@@ -72,6 +75,13 @@ export class SmartsheetTarget implements SheetTarget {
       // which are deliberately NOT email addresses, so those cells must opt out of strict
       // parsing and be stored as display values.
       if (CONTACT_COLUMNS.has(title)) { out.push({ columnId: id, value: v, strict: false }); continue; }
+      // PICKLIST cells are also parsed strictly by default, and this client sends
+      // allowPartialSuccess=false, so a single unrecognised option fails the ENTIRE batch.
+      // A sheet created by an older version of this tool has an older set of options - adding
+      // a Sync Status value would otherwise break every existing sheet until someone edited
+      // the column by hand. The values written here always come from our own enums, so strict
+      // parsing buys nothing; degrade to a stored display value instead of failing 500 rows.
+      if (PICKLIST_COLUMNS.has(title)) { out.push({ columnId: id, value: v, strict: false }); continue; }
       out.push({ columnId: id, value: v });
     }
     return out;
