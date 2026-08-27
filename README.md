@@ -8,6 +8,31 @@ Repository → Scanner → Extractors → Normalized Project Model → Validatio
 
 **Three promises:** it never invents a fact, every row says where it came from, and it never overwrites a decision a person made in the sheet.
 
+---
+
+## Try it in 30 seconds (no Smartsheet account, no API token, no config)
+
+```bash
+npm install
+npm test              # 49 tests
+npm run demo:report   # analyses the bundled sample repo "Orderly"
+npm run demo:walkthrough   # the whole sync story against an in-memory sheet
+```
+
+`demo:walkthrough` runs the real analyzer and the real sync engine - only the Smartsheet transport
+is swapped for an in-memory sheet. Nothing is sent anywhere. It prints the five-step story:
+
+```
+23 created  ->  re-run changes nothing  ->  a README checkbox is ticked, one row updates
+            ->  a PM sets that row to Blocked and the repo disagrees: the human value wins,
+                the repo value moves to Repo Status, the row is flagged Conflict
+            ->  a FIXME is deleted: the row is KEPT and flagged "Missing in Repo", never deleted
+
+Final sheet: 23 rows, 5 flagged for human review, 0 rows deleted.
+```
+
+It edits two files in the sample repo and restores them, leaving the working tree clean.
+
 - Works with **or without** Smartsheet API access (CSV fallback).
 - `sync --dry-run` shows every change before anything is written.
 - 49 automated tests cover extraction, no-fabrication, deduplication, updates, protected human fields, invalid credentials, rate-limit retries, and dry-run safety.
