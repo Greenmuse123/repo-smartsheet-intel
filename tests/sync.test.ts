@@ -1038,23 +1038,28 @@ describe('round-10 review regressions', () => {
     expect(row.cells['Repo Fingerprint']).toBe(fingerprintBefore);
   });
 
-  it('surfaces a conflict hiding behind a current fingerprint (R10-02b)', async () => {
-    // The fingerprint can match while `Repo Status` - the merge baseline - is stale, on an
-    // imported or hand-repaired sheet. Both sides have then moved and disagree, but the
-    // disagreement was computed and dropped on the floor, leaving the row Synced forever with
-    // two visibly different Status values.
+  it('repairs a stale Repo Status instead of inventing a conflict (R10-02b)', async () => {
+    // A current fingerprint PROVES the repository has not moved, because Status is part of the
+    // fingerprint. So a `Repo Status` that disagrees is a stale mirror - hand-edited, imported,
+    // or written by an older build - and not evidence that both sides moved.
+    //
+    // An earlier version declared a conflict here. That trusted the stale mirror over a cache
+    // holding the true last value and turned ordinary rows into conflicts that then stuck. With
+    // the repository provably still, a human on a different Status is simply ahead of it.
     await run(normalize([risk()]), T1);
     const row = target.rows[0];
-    expect(row.cells['Sync Status']).toBe('New');
-    row.cells['Repo Status'] = 'Not Started';               // stale baseline
-    row.cells['Status'] = 'In Progress';                    // human moved away from it
+    row.cells['Repo Status'] = 'Not Started';               // stale mirror
+    row.cells['Status'] = 'In Progress';                    // a person is ahead of the repo
     row.cells['Sync Status'] = 'Synced';
 
-    const p = await run(normalize([risk()]), T2);           // repo says Unknown: both moved
-    expect(p.counts.conflict).toBe(1);
-    expect(row.cells['Sync Status']).toBe('Conflict');
-    expect(row.cells['Status']).toBe('In Progress');        // human value still wins
-    expect(row.cells['Repo Status']).toBe('Unknown');       // and ours is surfaced
+    const p = await run(normalize([risk()]), T2);
+    expect(p.counts.conflict).toBe(0);                      // no invented conflict
+    expect(row.cells['Repo Status']).toBe('Unknown');       // the mirror is repaired
+    expect(row.cells['Status']).toBe('In Progress');        // their value is untouched
+    expect(p.changes[0].reasons.join(' ')).toMatch(/stale Repo Status/);
+
+    const p2 = await run(normalize([risk()]), T3);
+    expect(p2.counts.unchanged).toBe(1);                    // and it settles, never sticks
   });
 
   it('adopts a path-keyed item whose displayed text changed (R10-03)', async () => {
@@ -1154,5 +1159,48 @@ describe('round-11 review regressions', () => {
     expect(state.items[id].lastWrittenHumanReview).toBe(true);  // cache repaired
     const p = await run(normalize([risk()]), T3);
     expect(p.counts.unchanged).toBe(1);                        // and then it settles
+  });
+});
+
+describe('round-12 review regressions', () => {
+  it('adopts a long item whose stored text was clipped on the way to the cell (R12)', async () => {
+    // Cells are clipped at 3900 characters. Comparing the row against the RAW item text
+    // rejected a legitimate migration of any long item, because the sheet can only ever hold
+    // the clipped form. Compare against what we would actually write.
+    // A manifest with many dependencies produces an Item far longer than a cell can hold.
+    const deps = Array.from({ length: 400 }, (_, i) => `pkg-${i}@1.0.0`).join(', ');
+    const e: RawEvidence = { extractor: 'manifests', sourceType: 'Declared dependency', path: 'package.json', line: 1, section: 'deps', excerpt: deps };
+    const [item] = normalize([e]);
+    await run(normalize([e]), T1);
+    const row = target.rows[0];
+    expect(String(row.cells['Item']).length).toBeLessThan(item.item.length); // it WAS clipped
+    row.cells['Item ID'] = item.legacyItemIds![0];
+    row.cells['Owner'] = 'human@example.com';
+    state = { version: 1, sheetId: 'sheet-1', items: {} };
+
+    // Make the repository move as well, so the fingerprint no longer matches and the check has
+    // to fall through to comparing the text - which on the sheet exists only in clipped form.
+    const moved = { ...e, commit: 'abc1234' };
+    const p = await run(normalize([moved]), T2);
+    expect(p.counts.create).toBe(0);                       // adopted, not duplicated
+    expect(row.cells['Item ID']).toBe(item.itemId);
+    expect(row.cells['Owner']).toBe('human@example.com');
+  });
+
+  it('will not hand one item the row of another that merely displays the same text (R12)', async () => {
+    // Displayed Item text can be shortened, so two different items CAN show the same string.
+    // Text equality alone was enough to carry one person's Owner and Notes to the wrong item.
+    const long = (tail: string) => 'TODO: ' + 'y'.repeat(4000) + tail;
+    const a: RawEvidence = { extractor: 'todo-comments', sourceType: 'TODO comment', path: 'src/a.ts', line: 1, excerpt: long('AAA') };
+    const b: RawEvidence = { extractor: 'todo-comments', sourceType: 'TODO comment', path: 'src/b.ts', line: 1, excerpt: long('BBB') };
+    const [ia] = normalize([a]);
+    await run(normalize([b]), T1);                          // the sheet holds B
+    const row = target.rows[0];
+    row.cells['Item ID'] = ia.legacyItemIds![0];            // wearing A's older ID
+    row.cells['Owner'] = 'owner-of-b@example.com';
+
+    const p = await run(normalize([a]), T2);
+    expect(p.counts.create).toBe(1);                        // A gets its own row
+    expect(row.cells['Owner']).toBe('owner-of-b@example.com');
   });
 });

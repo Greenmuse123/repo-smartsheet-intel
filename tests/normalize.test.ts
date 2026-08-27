@@ -191,3 +191,25 @@ describe('de-duplication must never discard evidence (round-5 review R5-05)', ()
   });
 });
 
+
+describe('redaction must not collapse two identities (round-12 review)', () => {
+  it('keeps two TODOs whose secrets redact to the same text', () => {
+    // Identity was computed from the REDACTED copy, so two different TODOs in one file whose
+    // secret values redact identically shared one identity and one was silently dropped as a
+    // duplicate. Losing real repository evidence is the one failure this tool must not have.
+    const a = todo({ path: 'src/a.ts', line: 1, excerpt: 'TODO: rotate token=aaaaaaaaaaaa now' });
+    const b = todo({ path: 'src/a.ts', line: 9, excerpt: 'TODO: rotate token=bbbbbbbbbbbb now' });
+    const out = normalize([a, b]);
+    expect(out).toHaveLength(2);
+    expect(out[0].itemId).not.toBe(out[1].itemId);
+    // ...and neither secret is published
+    expect(JSON.stringify(out)).not.toContain('aaaaaaaaaaaa');
+    expect(JSON.stringify(out)).not.toContain('bbbbbbbbbbbb');
+  });
+
+  it('still collapses two TODOs that really are the same text', () => {
+    const a = todo({ path: 'src/a.ts', line: 1, excerpt: 'TODO: rotate the token now' });
+    const b = todo({ path: 'src/a.ts', line: 9, excerpt: 'TODO: rotate the token now' });
+    expect(normalize([a, b])).toHaveLength(1);
+  });
+});

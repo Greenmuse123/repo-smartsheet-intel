@@ -10,7 +10,7 @@
  * Use:  `const plan = planSync(items, rows, state, now)`; `await applyPlan(plan, target, state, now)`.
  */
 import type { PlannedChange, ProjectItem, Status, SyncPlan, SyncStatus } from '../model/types.js';
-import { humanSeedCells, repoCells, reviewCells, sharedCells } from '../adapters/smartsheet/mapper.js';
+import { humanSeedCells, repoCells, reviewCells, sharedCells, trunc } from '../adapters/smartsheet/mapper.js';
 import type { SheetTarget, TargetRow, CellValues } from './target.js';
 import type { SyncState } from './state.js';
 import { isPathKeyed } from '../model/ids.js';
@@ -89,9 +89,20 @@ function sameSourcePath(source: string, repositoryPath: string): boolean {
  * legitimately change (a renamed CI job) and only the file can be compared.
  */
 function looksLikeSameItem(row: TargetRow, item: ProjectItem): boolean {
-  return isPathKeyed(item.itemId)
-    ? sameSourcePath(String(row.cells['Source'] ?? ''), item.repositoryPath)
-    : String(row.cells['Item'] ?? '') === item.item;
+  // The strongest possible signal: the row still carries the fingerprint this item computes to,
+  // so it IS this item and nothing about it has changed since the last sync.
+  if (String(row.cells['Repo Fingerprint'] ?? '') === item.fingerprint) return true;
+  if (isPathKeyed(item.itemId)) {
+    return sameSourcePath(String(row.cells['Source'] ?? ''), item.repositoryPath);
+  }
+  // Compare against the value we would actually WRITE, not the raw one: long text is clipped on
+  // the way to a cell, so a legitimate migration of a long item was being rejected for
+  // differing from its own stored form.
+  const stored = String(row.cells['Item'] ?? '');
+  if (stored !== String(trunc(item.item) ?? '')) return false;
+  // Displayed text can be shortened, so two different items CAN show the same Item. Require the
+  // file to agree as well before handing one item's row - and its human columns - to another.
+  return sameSourcePath(String(row.cells['Source'] ?? ''), item.repositoryPath);
 }
 
 export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncState, now: string): SyncPlan {
@@ -302,21 +313,22 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
         });
         continue;
       }
-      if (conflicted && !alreadyConflict) {
-        // The fingerprint says nothing repo-controlled moved, but `Repo Status` - the merge
-        // baseline - is stale, and against it both sides HAVE moved and disagree. Without this
-        // the disagreement was computed and then dropped on the floor, leaving the row Synced
-        // forever with two visibly different Status values.
+      if (repoChangedStatus) {
+        // `Repo Status` disagrees with the repository while the fingerprint says the item has
+        // not moved. The fingerprint covers Status, so a current fingerprint PROVES the
+        // repository did not move - the mirror is simply stale (hand-edited, imported, written
+        // by an older build). Repair it.
+        //
+        // An earlier version declared a conflict here instead. That was wrong at the root: it
+        // trusted the stale mirror over a cache that recorded the true last value, and turned
+        // ordinary rows into conflicts that then stuck. With the repository provably still, a
+        // human sitting on a different Status is just ahead of it, which is normal.
         changes.push({
-          action: 'conflict',
+          action: 'update',
           item,
           rowId: row.rowId,
-          cells: {
-            ...repoCells(item, 'Conflict', now),
-            ...sharedCells(sheetStatus as Status),
-            ...writeReview(true),
-          },
-          reasons: [`status conflict: sheet says "${sheetStatus}", repo says "${item.status}", last synced "${lastWrittenStatus || '(none)'}"`],
+          cells: { 'Repo Status': item.status, 'Last Synced': now },
+          reasons: [`repaired a stale Repo Status: the sheet said "${lastWrittenStatus || '(none)'}" but the repository has not moved from "${item.status}"`],
         });
         continue;
       }
@@ -447,7 +459,10 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
         typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
       );
       const pending = rule.drift ? rule.write(true) : {};
-      const differs = Object.entries(pending).some(([k, v]) => row.cells[k] !== v);
+      // As on the present-item path, drift must be repaired even when the write changes no
+      // visible cell: that write is the only thing that makes `remember()` run and bring the
+      // local cache back into line.
+      const differs = rule.drift || Object.entries(pending).some(([k, v]) => row.cells[k] !== v);
       if (differs) {
         changes.push({
           action: 'missing',

@@ -75,7 +75,11 @@ export function normalize(evidence: RawEvidence[], opts: NormalizeOptions = {}):
     // The hash is one-way. It is NOT a privacy guarantee on its own: it is an unsalted,
     // truncated digest, so someone who can guess a candidate path can confirm the guess
     // offline. It hides an unguessable value; it does not hide a guessable one.
-    const rawEv = { ...ev, path: raw.path };
+    // Identity is computed from the ORIGINAL evidence, never the redacted copy. Redaction is
+    // lossy in the text as well as the path: two different TODOs in one file whose secrets
+    // redact to the same string would otherwise share an identity, and one would be silently
+    // dropped as a duplicate - losing real repository evidence, the one thing this must not do.
+    const rawEv = raw;
     const itemId = itemIdFor(rawEv);
     // De-duplicate on the FULL identity key, never on the truncated id. Two different files can
     // collide in 32 bits, and dropping one would silently discard real repository evidence -
