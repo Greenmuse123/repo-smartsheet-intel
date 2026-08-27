@@ -87,6 +87,32 @@ export class SmartsheetTarget implements SheetTarget {
     return out;
   }
 
+  /**
+   * Reads the one cell's history and looks for a change that is not ours.
+   *
+   * This exists because a checkbox cannot record who ticked it. Comparing two snapshots one
+   * sync apart cannot see a person clearing the box and ticking it again in between - the sheet
+   * ends up holding exactly the value we left there. The history can see it.
+   */
+  async humanMovedReviewSince(rowId: number, sinceIso: string): Promise<boolean | undefined> {
+    const columnId = this.byTitle.get('Human Review');
+    if (columnId === undefined) return undefined;
+    const since = Date.parse(sinceIso);
+    if (Number.isNaN(since)) return undefined;
+    try {
+      const history = await this.client.cellHistory(this.sheetId, rowId, columnId);
+      return history.some((h) => {
+        const at = h.modifiedAt ? Date.parse(h.modifiedAt) : NaN;
+        return Number.isFinite(at) && at > since;
+      });
+    } catch (e) {
+      // Never let a bookkeeping question fail a sync. Not knowing is the safe answer: the
+      // caller keeps the person's value rather than clearing it.
+      log.warn(`Could not read the Human Review history for row ${rowId} (${(e as Error).message}); leaving that checkbox alone.`);
+      return undefined;
+    }
+  }
+
   async addRows(rows: CellValues[]): Promise<number[]> {
     if (!rows.length) return [];
     return this.client.addRows(this.sheetId, rows.map((cells) => ({ toBottom: true as const, cells: this.toCells(cells) })), this.batchSize);

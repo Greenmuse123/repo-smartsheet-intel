@@ -192,3 +192,24 @@ describe('schema drift must not fail a whole batch (round-5 self-review)', () =>
     expect(idCell.strict).toBeUndefined(); // plain text columns keep the default
   });
 });
+
+describe('the tool locks its own bookkeeping columns (round-24)', () => {
+  it('asks Smartsheet to lock every column the tool writes', () => {
+    // A locked column stops Editors changing it, which is the difference between asking people
+    // not to touch the tool's notes and them not being able to by accident. Owners and Admins
+    // can still unlock, so it is a guard rail rather than a boundary - and the README says so.
+    const body = sheetCreateBody('T');
+    const locked = new Set(body.columns.filter((c) => c.locked === true).map((c) => c.title));
+    for (const title of ['Item ID', 'Repo Status', 'Repo Review', 'Repo Path', 'Review Owner', 'Repo Fingerprint', 'Sync Status']) {
+      expect(locked.has(title), title).toBe(true);
+    }
+  });
+
+  it('leaves the columns people are meant to fill in unlocked', () => {
+    const body = sheetCreateBody('T');
+    const locked = new Set(body.columns.filter((c) => c.locked === true).map((c) => c.title));
+    for (const title of ['Status', 'Human Review', 'Priority', 'Owner', 'Due Date', 'Management Notes']) {
+      expect(locked.has(title), title).toBe(false);
+    }
+  });
+});

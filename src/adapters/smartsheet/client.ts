@@ -12,6 +12,9 @@
 export interface SheetColumn { id: number; title: string; type: string; primary?: boolean; options?: string[] }
 export interface SheetCell { columnId: number; value?: string | number | boolean; displayValue?: string }
 export interface SheetRow { id: number; rowNumber?: number; cells: SheetCell[] }
+/** One historical value of a cell. `modifiedAt` is ISO-8601. */
+export interface CellHistoryEntry { value?: string | number | boolean; modifiedAt?: string; modifiedBy?: { email?: string; name?: string } }
+
 export interface Sheet { id: number; name: string; columns: SheetColumn[]; rows: SheetRow[]; permalink?: string }
 
 export interface RowToAdd { toBottom: true; cells: Array<{ columnId: number; value: string | number | boolean }> }
@@ -74,6 +77,20 @@ export class SmartsheetClient {
   }
 
   /** Adds rows in batches. Returns created row ids in input order. */
+  /**
+   * Every value a single cell has held, newest first.
+   *
+   * Smartsheet documents this as resource-intensive and rate-limits it far harder than
+   * everything else (30 requests per minute per token), so it is only ever asked about a cell
+   * we are about to CLEAR - never in bulk. See `applyPlan`.
+   */
+  async cellHistory(sheetId: string | number, rowId: number, columnId: number): Promise<CellHistoryEntry[]> {
+    const res = await this.request<{ data?: CellHistoryEntry[] }>(
+      'GET', `/sheets/${sheetId}/rows/${rowId}/columns/${columnId}/history?include=columnType&level=0`,
+    );
+    return res.data ?? [];
+  }
+
   async addRows(sheetId: string | number, rows: RowToAdd[], batchSize = 400): Promise<number[]> {
     const ids: number[] = [];
     for (const batch of chunk(rows, batchSize)) {

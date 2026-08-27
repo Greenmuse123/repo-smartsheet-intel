@@ -19,7 +19,7 @@ Repository → Scanner → Extractors → Normalized Project Model → Validatio
 
 - Works with **or without** Smartsheet API access (CSV fallback).
 - `sync --dry-run` shows every change before anything is written.
-- 139 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, the required-column guard on the real Smartsheet target, invalid credentials, authorization vs. token errors, plan-restriction errors, rate-limit retries, and dry-run safety. They run against a fake `fetch`; no test performs a live API call.
+- 144 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, the required-column guard on the real Smartsheet target, invalid credentials, authorization vs. token errors, plan-restriction errors, rate-limit retries, and dry-run safety. They run against a fake `fetch`; no test performs a live API call.
 
 ---
 
@@ -139,7 +139,7 @@ app/
     adapters/csv.ts          CSV + column-definitions fallback
     report/report.ts         Repository Intelligence Report
     log/logger.ts            plain-language logging
-  tests/                     vitest suites (139 tests)
+  tests/                     vitest suites (144 tests)
   examples/sample-repo/      "Orderly" demo repository + sample-repo.project-config.yaml
   docs/                      DATA-MAPPING.md · smartsheet-import.md · DEMO.md
 ```
@@ -149,7 +149,7 @@ app/
 ```
 cd app
 npm install
-npm test          # 139 tests
+npm test          # 144 tests
 npm run typecheck
 ```
 
@@ -315,18 +315,19 @@ The computer reads the sticky notes inside the toy box, copies them neatly onto 
   then on it never writes that checkbox again, whether you leave it or clear it. A warning you
   can dismiss for good is worth more than one that keeps coming back, and the cost is that this
   row will not be flagged automatically again.
-- **What this tool cannot see, and will not pretend to:** it compares two snapshots of the
-  sheet, one sync apart. If you clear the `Human Review` box and tick it again before the next
-  sync runs, the sheet ends up holding exactly the value the tool left there, and nothing
-  anywhere distinguishes that from a box nobody touched - so a later run can clear it as its
-  own. Smartsheet's cell history would show your edits; this tool does not read cell history.
-  One move between syncs is recorded (`Review Owner` says whose the box is from then on); a
-  move and its exact reversal is not.
+- **What two snapshots cannot see, and what is done about it:** the engine compares the sheet
+  now against the sheet one sync ago. If you clear the `Human Review` box and tick it again in
+  between, the sheet ends up holding exactly the value the tool left there, and no cell
+  distinguishes that from a box nobody touched. So before it clears any ticked box, the tool
+  reads that one cell's history and looks for a change since its own last write; if it finds
+  one it keeps your value and marks the box yours. It asks only when it is about to clear a
+  tick, because Smartsheet rate-limits cell history far harder than everything else (30
+  requests a minute). If the history cannot be read at all, it keeps your value.
 - **The technical columns are the tool's own notes, and it believes them:** `Repo Status`,
-  `Repo Review`, `Repo Path` and `Review Owner` are how it remembers what it last did. Editing
-  them changes what it concludes - that is what they are for, and it is also why they are
-  marked technical and meant to stay hidden. Nothing in a spreadsheet can stop a person
-  editing a cell, so the tool does not claim otherwise.
+  `Repo Review`, `Repo Path` and `Review Owner` are how it remembers what it last did, so
+  editing them changes what it concludes. `setup-sheet` creates them **locked**, which stops
+  Editors changing them; an Owner or Admin can still unlock a column, so treat it as a guard
+  rail rather than a boundary. Share the sheet as Editor and run the tool as the Owner.
 - **A row written before the `Repo Path` column existed is left alone until you fix it:** such a
   row does not say which file it is for, and nothing else on it can be trusted to say so - every
   cell can be typed by hand, and the fingerprint is public and deterministic. The tool refuses to
@@ -354,4 +355,4 @@ The computer reads the sticky notes inside the toy box, copies them neatly onto 
 - **State management:** local `state.json` is a cache; `Item ID` + `Repo Fingerprint` + `Repo Status` + `Repo Review` + `Repo Path` + `Review Owner` in the sheet are sufficient to rebuild it (tested). Those six plus `Sync Status` are enforced as required columns: `SmartsheetTarget` refuses to sync a sheet missing any of them rather than silently mislabelling edits.
 - **Security:** sensitive-path gate before ignore rules, regex redaction at the excerpt boundary, env-only credentials, no repo writes.
 - **Conflict handling:** human-controlled columns written on create only; shared columns merged; conflicts keep the human value and flag.
-- **Testing:** 139 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.
+- **Testing:** 144 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.

@@ -9,6 +9,14 @@ export type CellValues = Record<string, string | number | boolean | null>;
 export interface TargetRow { rowId: number; cells: CellValues }
 
 export interface SheetTarget {
+  /**
+   * Did a person move `Human Review` on this row after the moment we last wrote it?
+   *
+   * Optional, because it costs a request per row and only the real Smartsheet target can
+   * answer it. `undefined` means "cannot tell", which callers must treat as "assume they did
+   * not" - the in-memory target used by tests and dry runs returns exactly that.
+   */
+  humanMovedReviewSince?(rowId: number, sinceIso: string): Promise<boolean | undefined>;
   readonly sheetId: string;
   readonly columnTitles: string[];
   /** id -> row (cells keyed by column title) */

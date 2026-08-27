@@ -430,11 +430,13 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       else if (repoChangedStatus) reasons.push(`status ${lastWrittenStatus || '(none)'} → ${item.status}`);
     }
 
-    changes.push({ action, item, rowId: row.rowId, cells: {
-      ...repoCells(item, syncStatus, now),
-      ...sharedCells(status),
-      ...writeReview(humanReview),
-    }, reasons });
+    const cells: CellValues = { ...repoCells(item, syncStatus, now), ...sharedCells(status), ...writeReview(humanReview) };
+    changes.push({
+      action, item, rowId: row.rowId, cells, reasons,
+      // The one kind of write that can destroy a decision: clearing a box that is currently
+      // ticked. `applyPlan` checks the cell's history before doing it.
+      clearsReview: cells['Human Review'] === false && sheetReview,
+    });
   }
 
   for (const [id, rowsForId] of allRowsForId) {
@@ -561,6 +563,24 @@ export async function applyPlan(plan: SyncPlan, target: SheetTarget, state: Sync
     created = ids.length;
     log.info(`Created ${created} row${created === 1 ? '' : 's'} in the sheet.`);
   }
+  // Before clearing any ticked box, ask the sheet whether a person moved it since we last
+  // wrote. Two snapshots one sync apart cannot see a clear followed by a re-tick - the sheet
+  // ends up holding exactly the value we left - but the cell's own history can. This is asked
+  // ONLY about a box we are about to clear, because Smartsheet rate-limits history heavily.
+  for (const c of updates) {
+    if (!c.clearsReview || !target.humanMovedReviewSince || c.rowId === undefined) continue;
+    const since = state.items[c.item.itemId]?.lastSyncedAt;
+    if (!since) continue;
+    const moved = await target.humanMovedReviewSince(c.rowId, since);
+    if (moved !== true) continue;
+    // Somebody did move it. Keep what they left and record that the box is theirs from now on.
+    delete (c.cells as CellValues)['Human Review'];
+    delete (c.cells as CellValues)['Repo Review'];
+    (c.cells as CellValues)['Review Owner'] = 'human';
+    c.reviewRaisedForHuman = true;
+    c.reasons.push('left Human Review as you set it: its history shows you changed it since the last sync');
+  }
+
   if (updates.length) {
     updated = await target.updateRows(updates.map((c) => ({ rowId: c.rowId!, cells: c.cells })));
     for (const c of updates) {

@@ -128,6 +128,8 @@ export interface PlannedChange {
    * ownership rule treats the tick as theirs and we never clear it on a later run.
    */
   reviewRaisedForHuman?: boolean;
+  /** Set when this write would clear a checkbox that is currently ticked - see `applyPlan`. */
+  clearsReview?: boolean;
   reasons: string[];
 }
 

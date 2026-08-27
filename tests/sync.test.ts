@@ -1526,3 +1526,59 @@ describe('round-23 review regressions', () => {
     expect(row.cells['Human Review']).toBe(true);
   });
 });
+
+describe('round-24: closing the snapshot gap with cell history', () => {
+  const risk = (over: Partial<RawEvidence> = {}): RawEvidence => ({
+    extractor: 'risk-heuristics', sourceType: 'Risk heuristic', path: 'src/auth/session.js',
+    line: 5, excerpt: 'FIXME in a security-sensitive file: sessions never expire', ...over,
+  });
+
+  it('will not clear a tick the cell history says a person moved (R24-01)', async () => {
+    // Two snapshots one sync apart cannot see a clear followed by a re-tick: the sheet ends up
+    // holding exactly the value the tool wrote. The cell's own history can see it, so before
+    // clearing any ticked box the tool asks - and only then, because Smartsheet rate-limits
+    // history far harder than everything else.
+    await run(normalize([risk()]), T1);
+    const row = target.rows[0];
+    expect(row.cells['Human Review']).toBe(true);          // ours, from the model requirement
+
+    // The person clears it and ticks it again, entirely between syncs. Nothing on the sheet
+    // differs from what we left; only the history knows.
+    let asked = 0;
+    (target as unknown as { humanMovedReviewSince: (r: number, s: string) => Promise<boolean> })
+      .humanMovedReviewSince = async () => { asked++; return true; };
+
+    // An item that no longer asks for review, so the tool would otherwise clear the box.
+    const plain = items(ev('src/auth/session.js', 'tidied up'))[0];
+    const plan = planSync([{ ...plain, itemId: normalize([risk()])[0].itemId }], await target.readRows(), state, T2);
+    await applyPlan(plan, target, state, T2);
+
+    expect(asked).toBe(1);                                  // asked once, about one row
+    expect(row.cells['Human Review']).toBe(true);           // their tick is left alone
+    expect(row.cells['Review Owner']).toBe('human');        // and the box is theirs now
+  });
+
+  it('does not ask about writes that cannot destroy anything (R24-01)', async () => {
+    // The question costs a request against a hard rate limit, so it is only ever asked when a
+    // ticked box is about to be cleared.
+    let asked = 0;
+    (target as unknown as { humanMovedReviewSince: () => Promise<boolean> })
+      .humanMovedReviewSince = async () => { asked++; return false; };
+    await run(items(ev('src/a.js', 'one')), T1);            // create
+    await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2); // ordinary update
+    expect(asked).toBe(0);
+  });
+
+  it('keeps the value when the history cannot be read at all (R24-01)', async () => {
+    // "Cannot tell" has to mean "leave it alone": the in-memory target and any failed request
+    // both answer undefined, and neither may cost somebody their decision.
+    await run(normalize([risk()]), T1);
+    const row = target.rows[0];
+    (target as unknown as { humanMovedReviewSince: () => Promise<undefined> })
+      .humanMovedReviewSince = async () => undefined;
+    const plain = items(ev('src/auth/session.js', 'tidied up'))[0];
+    const plan = planSync([{ ...plain, itemId: normalize([risk()])[0].itemId }], await target.readRows(), state, T2);
+    await applyPlan(plan, target, state, T2);
+    expect(row.cells['Human Review']).toBe(false);          // undefined means "carry on"
+  });
+});
