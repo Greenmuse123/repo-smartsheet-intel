@@ -1161,3 +1161,72 @@ describe('round-16 review regressions', () => {
   });
 
 });
+
+describe('round-17 review regressions', () => {
+  const risk = (over: Partial<RawEvidence> = {}): RawEvidence => ({
+    extractor: 'risk-heuristics', sourceType: 'Risk heuristic', path: 'src/auth/session.js',
+    line: 5, excerpt: 'FIXME in a security-sensitive file: sessions never expire', ...over,
+  });
+
+  it('does not treat two different secret-bearing paths as the same file (R17-01)', async () => {
+    // Source comparison used to normalise `[REDACTED-abc12345]` down to `[REDACTED]`, which was
+    // only ever needed by legacy-row adoption. It turned two different secret-bearing paths into
+    // the same string - the exact thing the discriminator exists to prevent - so one item's row
+    // could be written over another's while its Owner and Notes stayed attached.
+    const at = (secret: string): RawEvidence => ({
+      extractor: 'todo-comments', sourceType: 'TODO comment', path: `src/api_key=${secret}/a.ts`,
+      line: 1, excerpt: 'TODO: add retry',
+    });
+    const [mine] = normalize([at('aaaaaaaaaaaa')]);
+    await run(normalize([at('bbbbbbbbbbbb')]), T1);        // the sheet holds the OTHER path
+    const row = target.rows[0];
+    row.cells['Item ID'] = mine.itemId;                    // but wearing this item's ID
+    row.cells['Owner'] = 'owner-of-b@example.com';
+    row.cells['Management Notes'] = 'belongs to B';
+    const before = { ...row.cells };
+
+    const p = await run(normalize([at('aaaaaaaaaaaa')]), T2);
+    expect(p.counts.update).toBe(0);                       // refused
+    expect(row.cells['Source']).toBe(before['Source']);
+    expect(row.cells['Owner']).toBe('owner-of-b@example.com');
+    expect(row.cells['Management Notes']).toBe('belongs to B');
+  });
+
+  it('does not re-tick a dismissed raise when the item then disappears (R17-02)', async () => {
+    // The absent path never consulted the raise flag, so a person could dismiss a raised row,
+    // the item could vanish, and the tool would tick the box straight back.
+    const other = ev('src/other.js', 'keep me');
+    await run(normalize([risk(), other]), T1);
+    const row = target.rows[0];
+    row.cells['Repo Status'] = 'Done';                     // stale mirror
+    row.cells['Status'] = 'In Progress';                   // and somebody disagrees
+    await run(normalize([risk(), other]), T2);
+    expect(row.cells['Human Review']).toBe(true);          // raised
+
+    row.cells['Human Review'] = false;                     // dismissed
+    await run(normalize([other]), T3);                     // and now the item vanishes
+    expect(row.cells['Sync Status']).toBe('Missing in Repo');
+    expect(row.cells['Human Review']).toBe(false);         // their dismissal survives
+  });
+
+  it('keeps a dismissal even if the local state file is lost (R17-02)', async () => {
+    // The permanent bit lives only in state.json, so losing that file must not resurrect the
+    // tick. Moving the mirror with the raise is what makes a later dismissal read as theirs.
+    await run(normalize([risk()]), T1);
+    const row = target.rows[0];
+    row.cells['Repo Status'] = 'Done';
+    row.cells['Status'] = 'In Progress';
+    // A historical row whose mirror says false - reachable on imported or hand-repaired sheets.
+    // This is the case where the mirror move is the only thing standing between a dismissal and
+    // a re-tick, because the item itself is one the model wants reviewed.
+    row.cells['Repo Review'] = false;
+    await run(normalize([risk()]), T2);
+    expect(row.cells['Human Review']).toBe(true);
+    expect(row.cells['Repo Review']).toBe(true);           // the mirror moved with it
+
+    row.cells['Human Review'] = false;                     // dismissed
+    state = { version: 1, sheetId: 'sheet-1', items: {} }; // and the cache is gone
+    await run(normalize([risk({ commit: 'abc1234' })]), T3);
+    expect(row.cells['Human Review']).toBe(false);
+  });
+});

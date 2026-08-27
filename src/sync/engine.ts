@@ -69,13 +69,16 @@ function reviewRule(sheetReview: boolean, cache: boolean | undefined, mirror: bo
  * Compare the file only, with any discriminator normalised away.
  */
 function sameSourcePath(source: string, repositoryPath: string): boolean {
+  // Compared EXACTLY, discriminator and all. An earlier version normalised `[REDACTED-abc12345]`
+  // down to `[REDACTED]` so that a path could still be matched after the Item ID changed length;
+  // that was only ever needed by legacy-row adoption, which no longer exists. Keeping it turned
+  // two different secret-bearing paths into the same string - which is precisely what the
+  // discriminator is there to prevent - and let one item's row be written over another's.
+  //
   // Do NOT split on ' - ': a filename may contain it, and `src/a - one.ts` and `src/a - two.ts`
   // would both collapse to `src/a`. Match the path as a prefix and require a real boundary.
-  const norm = (v: string) => v.replace(/\[REDACTED-[0-9a-f]+\]/g, '[REDACTED]');
-  const want = norm(repositoryPath);
-  const got = norm(source);
-  if (!got.startsWith(want)) return false;
-  const rest = got.slice(want.length);
+  if (!source.startsWith(repositoryPath)) return false;
+  const rest = source.slice(repositoryPath.length);
   return rest === '' || rest.startsWith(':') || rest.startsWith(' - ');
 }
 
@@ -295,12 +298,13 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
           cells: {
             'Repo Status': item.status,
             'Last Synced': now,
-            // Tick the box and record separately that WE raised it (see `reviewRaisedForHuman`
-            // in the state file). Trying to express this by moving the baselines could not work:
-            // one boolean has to say both "the box is ticked" and "who ticked it", so pinning
-            // them false made the warning durable but then re-ticked the box after every human
-            // clear on any item the model itself wants reviewed.
-            ...(somebodyDisagrees ? { 'Human Review': true } : {}),
+            // Tick the box, move the mirror with it, and record separately that WE raised it
+            // (see `reviewRaisedForHuman` in the state file). The mirror matters if the local
+            // file is later lost: a dismissal then reads as false against a true mirror, which
+            // every ownership rule calls the person's, so their decision still survives. The
+            // separate flag is what makes the raise durable while the file exists - one boolean
+            // cannot say both what the value is and who set it.
+            ...(somebodyDisagrees ? { 'Human Review': true, 'Repo Review': true } : {}),
           },
           reviewRaisedForHuman: somebodyDisagrees,
           reasons: somebodyDisagrees
@@ -405,7 +409,9 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
         // The SAME rule as the present-item paths - not a second copy of it. Selecting one
         // baseline with `??` here let a stale cache hide a disagreeing mirror (and vice versa),
         // which overwrote a human clear on one path and a human tick on the other.
-        const absentRule = reviewRule(
+        const absentRule = state.items[id]?.reviewRaisedForHuman === true
+          ? { baseline: undefined as boolean | undefined, humanOwns: true, drift: false, write: () => ({}) }
+          : reviewRule(
           row.cells['Human Review'] === true,
           state.items[id]?.lastWrittenHumanReview,
           typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
@@ -457,7 +463,9 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // `Repo Review` must move with `Human Review` when WE tick it - otherwise the next run
     // reads our own tick as a human edit and strands it. But if the box is already ticked we
     // write neither, so a person's tick stays theirs.
-    const reviewWrite: CellValues = reviewRule(
+    // The absent path has to honour a raise as well. It did not, so a person could dismiss a
+    // raised row, the item could then disappear, and the tool would tick the box straight back.
+    const reviewWrite: CellValues = state.items[id]?.reviewRaisedForHuman === true ? {} : reviewRule(
       row.cells['Human Review'] === true,
       state.items[id]?.lastWrittenHumanReview,
       typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
@@ -547,8 +555,10 @@ function remember(state: SyncState, c: PlannedChange, rowId: number, now: string
     // A tick we raised for a person is not ours: leaving the baseline where it was makes the
     // sheet and the baseline disagree, which is exactly how the ownership rule records "theirs".
     reviewRaisedForHuman: c.reviewRaisedForHuman ? true : (raiseStillStanding(state, c, rowId) || undefined),
+    // A raise writes both the box and the mirror, so record that: the two agreeing is what
+    // makes a later dismissal read as the person's, even if this file is lost first.
     lastWrittenHumanReview: c.reviewRaisedForHuman
-      ? carried
+      ? true
       : (c.cells as CellValues)['Human Review'] !== undefined
       ? (c.cells as CellValues)['Human Review'] === true
       : (c.cells as CellValues)['Repo Review'] !== undefined
