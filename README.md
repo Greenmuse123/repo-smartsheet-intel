@@ -295,3 +295,82 @@ The computer reads the sticky notes inside the toy box, copies them neatly onto 
 - **Security:** sensitive-path gate before ignore rules, regex redaction at the excerpt boundary, env-only credentials, no repo writes.
 - **Conflict handling:** human-controlled columns written on create only; shared columns merged; conflicts keep the human value and flag.
 - **Testing:** 49 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.
+
+---
+
+# Run against a real Smartsheet (2026-08-26)
+
+The tool was exercised end to end against a live Smartsheet account. Three things came out of that
+which are worth stating plainly, because two of them are defects this project found in itself.
+
+## 1. The REST API is paywalled, and the trial does not open it
+
+Verified by clicking it, not by reading marketing:
+
+| Plan | API access |
+|---|---|
+| Free | No |
+| **30-day Business trial** | **No** - "Generate new access token" opens an *"Upgrade for Smartsheet API"* modal |
+| Business and above | Yes (3-member minimum) |
+
+So `setup-sheet` / `sync` remain real, tested code against the documented API, exercised only through
+a fake `fetch` and an in-memory sheet target. That limitation is stated here rather than hidden.
+
+## 2. Defect found: the CSV export was unreadable by Smartsheet
+
+`csvFor()` emitted UTF-8 **with no byte-order mark**. Smartsheet sniffs the encoding and rejects a
+BOM-less file with *"Failed to upload file"* the moment it contains any multibyte character - which
+the bundled sample does, via the truncator's own `…`.
+
+Isolated by single-variable testing: the byte-identical failing file **plus a BOM** imports fine.
+
+Both intuitive suspects were wrong, and both are worth noting:
+
+- **CRLF was not the cause.** RFC 4180 mandates it and the fixed file keeps it.
+- **ASCII-folding is the wrong fix.** It would silently distort non-English repository text, which
+  violates the project's central rule. A version that folded characters *worked*, and would have
+  shipped a data-corrupting bug behind a green test suite.
+
+Fixed in `csvFor()` (one line, plus a regression test asserting BOM position, CRLF retention and
+`U+2026` round-tripping). Scope is precise: `csvFor()` renders booleans as `Yes`/`No`
+(`src/adapters/csv.ts`), whereas the API path sends a real JSON boolean
+(`src/adapters/smartsheet/mapper.ts`) - so `rsi sync` produces genuine checkboxes and the CSV path
+cannot. That is a concrete, evidenced reason to prefer the API path.
+
+## 3. Defect found: this project's own documentation contained a false claim
+
+`docs/smartsheet-import.md` asserted that converting `Human Review` to a Checkbox column converts
+imported `"Yes"`/`"No"` text to checked/unchecked. **It does not.** Measured on the live sheet:
+
+| Formula | Result |
+|---|---|
+| `COUNTIF([Human Review]:[Human Review], true)` | 0 |
+| `COUNTIF([Human Review]:[Human Review], 1)` | 0 |
+| `COUNTIF([Human Review]:[Human Review], "Yes")` | **3** (correct) |
+
+The column type changes only the display; the cells keep the literal strings. The Summary-field
+recipe in that same doc used the broken formula and would have reported **0 items needing review**
+on a tool whose entire premise is never stating anything it cannot back up. Both corrected.
+
+## What was built on the live sheet
+
+23 rows / 22 typed columns imported, then the surrounding Smartsheet toolset built by hand:
+
+| Feature | Detail |
+|---|---|
+| Sheet Summary | 4 formulas - Open **10**, Blocked **0**, Needs review **3**, Sync conflicts **0** |
+| Conditional formatting | `Confidence = Low` → amber row |
+| Saved filter (**shared**) | `Confidence = Low` OR `Status = Blocked` OR `Sync Status ∈ (Conflict, Missing in Repo)` → 3 of 23 |
+| Report | grouped by `Type`, 8 columns |
+| Dashboard | Metric widget bound to **Sheet Summary data** |
+| Automation | rows flagged Conflict/Missing → alert **contacts in the `Owner` cell** |
+| Automation | `Owner is Blank` → weekly **Update Request** |
+
+Two of those are the point of the whole design:
+
+- The alert recipient picker offers **only `Owner`**, because `Owner` is a `CONTACT_LIST` column. A
+  text column cannot be an alert recipient - column type is a design decision, not formatting.
+- `Owner is Blank` matches **exactly 7 of 23** rows, matching the generated report's own line
+  *"Owners: 7 of 23 items have no literal owner evidence and are left blank."* The tool refuses to
+  guess an owner, so Smartsheet asks a human every week until one is supplied. The refusal to
+  fabricate becomes a workflow rather than a gap.
