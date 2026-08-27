@@ -15,6 +15,50 @@ import type { SheetTarget, TargetRow, CellValues } from './target.js';
 import type { SyncState } from './state.js';
 import { log } from '../log/logger.js';
 
+/**
+ * Who owns the Human Review checkbox right now, and what we are allowed to write to it.
+ *
+ * There are two records of what WE last wrote: the local cache and the sheet's `Repo Review`
+ * mirror. Either can go stale - the cache can be rolled back, copied between machines or
+ * interrupted; the mirror can be hand-edited, or added late to an older sheet. Every previous
+ * attempt at this picked one of them to trust and simply moved the lost decision to the other
+ * direction, so this is the single rule, used by every path that touches the checkbox.
+ *
+ * - No baseline at all: we cannot tell our tick from a person's. Do not touch the visible
+ *   checkbox; adopt whatever it says as the baseline so later runs have one. Writing it and
+ *   recording it as ours is what let a later run reverse a real decision.
+ * - Two baselines that disagree WITH EACH OTHER: that is technical drift, not a human edit -
+ *   they cannot both be right. Preserve what the sheet shows, and re-point both baselines at
+ *   it so the drift stops recurring. This is the only way out of a stale mirror that would
+ *   otherwise suppress a required flag forever.
+ * - Otherwise: the box is ours to recompute only if the sheet still agrees with the baseline.
+ *   If it differs, a person moved it - in EITHER direction - and it is theirs from then on.
+ */
+function reviewRule(sheetReview: boolean, cache: boolean | undefined, mirror: boolean | undefined): {
+  baseline: boolean | undefined;
+  humanOwns: boolean;
+  write: (want: boolean) => CellValues;
+} {
+  const baselines = [cache, mirror].filter((b): b is boolean => b !== undefined);
+  if (baselines.length === 0) {
+    // We have no record of ever writing this cell, so we cannot claim its value - and we must
+    // not adopt it as ours either: that only delays the loss by one run, because the next run
+    // sees the sheet agreeing with a baseline it thinks is its own and recomputes over it.
+    // Leave both cells alone. Only rows that predate the mirror column can be in this state.
+    return { baseline: undefined, humanOwns: true, write: () => ({}) };
+  }
+  if (baselines.length === 2 && baselines[0] !== baselines[1]) {
+    // Technical drift: the two records of OUR value disagree, so they cannot both be right and
+    // this is not a human edit. Preserve what the sheet shows and re-point the mirror at it, so
+    // the next run has one agreed baseline. Without this, a stale mirror could stop the tool
+    // ever flagging a row its own model says needs review.
+    return { baseline: sheetReview, humanOwns: true, write: () => ({ 'Repo Review': sheetReview }) };
+  }
+  const baseline = baselines[0];
+  const humanOwns = sheetReview !== baseline;
+  return { baseline, humanOwns, write: (want) => (humanOwns ? {} : reviewCells(want)) };
+}
+
 export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncState, now: string): SyncPlan {
   const byItemId = new Map<string, TargetRow>();
   const allRowsForId = new Map<string, TargetRow[]>();
@@ -46,7 +90,18 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       changes.push({ action: 'unchanged', item, cells: {}, reasons: [`skipped: ${allRowsForId.get(item.itemId)?.length ?? 2} sheet rows claim Item ID ${item.itemId}, so no update can be applied safely. Delete the extra copies; if they are genuinely different items, this is a digest collision and should be reported.`] });
       continue;
     }
-    const row = byItemId.get(item.itemId);
+    let row = byItemId.get(item.itemId);
+    let adoptedFrom: string | undefined;
+    if (!row) {
+      // A sheet synced before the digest was widened has this item under its old, shorter ID.
+      // Adopt that row and rewrite its identity in place. Creating a fresh row instead would
+      // duplicate every item, mark every original Missing in Repo, and strand the Owner,
+      // Priority and Management Notes a person had put on them.
+      for (const legacy of item.legacyItemIds ?? []) {
+        const old = byItemId.get(legacy);
+        if (old && !duplicateIds.has(legacy) && !seen.has(legacy)) { row = old; adoptedFrom = legacy; seen.add(legacy); break; }
+      }
+    }
     if (!row) {
       changes.push({ action: 'create', item, cells: { ...repoCells(item, 'New', now), ...humanSeedCells(item), ...sharedCells(item.status), ...reviewCells(item.humanReviewRequired) }, reasons: ['not in sheet yet'] });
       continue;
@@ -96,26 +151,27 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // the sheet says now. If any of them disagrees, someone moved it and it is theirs. That is
     // conservative in the one direction that matters - a stale flag costs somebody a glance, a
     // cleared one loses a decision silently.
-    const reviewBaselines = [
+    const rule = reviewRule(
+      sheetReview,
       st?.lastWrittenHumanReview,
       typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
-    ].filter((b): b is boolean => b !== undefined);
-    const reviewBaseline: boolean | undefined = reviewBaselines[0];
-    const humanOwnsReview = reviewBaselines.some((b) => b !== sheetReview);
-    // Once a person moves it, we stop writing the cell at all - in either direction. Protecting
-    // their ticks but not their clears meant a clear was recorded as our own baseline and then
-    // re-ticked by the next ordinary update. This mirrors how Priority and Owner already work:
-    // seeded once, then hands off.
-    const writeReview = (want: boolean): CellValues => (humanOwnsReview ? {} : reviewCells(want));
-    let reviewAfterUpdate: boolean;
-    if (reviewBaseline !== undefined) {
-      // We know what we last wrote: if the sheet differs, a person changed it and wins.
-      reviewAfterUpdate = sheetReview !== reviewBaseline ? sheetReview : item.humanReviewRequired;
-    } else {
-      // Truly no baseline (a sheet from before `Repo Review` existed, and no state file). We
-      // cannot tell our tick from a person's, so keep it: leaving a stale flag costs one
-      // glance, clearing a real one loses a decision silently.
-      reviewAfterUpdate = sheetReview || item.humanReviewRequired;
+    );
+    const humanOwnsReview = rule.humanOwns;
+    const writeReview = rule.write;
+    const reviewAfterUpdate = humanOwnsReview ? sheetReview : item.humanReviewRequired;
+
+    if (adoptedFrom) {
+      // The row is byte-identical apart from its identity, so the fingerprint matches and the
+      // ordinary path would call it unchanged and write nothing - leaving the old short ID on
+      // the sheet forever. Force the write so the identity is actually rewritten.
+      changes.push({
+        action: 'update',
+        item,
+        rowId: row.rowId,
+        cells: { ...repoCells(item, (String(row.cells['Sync Status'] ?? '') || 'Synced') as SyncStatus, now) },
+        reasons: [`adopted the existing row for ${adoptedFrom}: this item's ID was widened, so its identity was rewritten in place and your columns kept`],
+      });
+      continue;
     }
 
     if (!repoChanged) {
@@ -248,18 +304,19 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
         // Clearing the review flag here is only safe when the flag is still OURS. If the sheet
         // checkbox no longer matches the value we last wrote, a person moved it deliberately
         // and it is not ours to reset - the same rule the present-item path follows.
-        // Same rule as the present-item paths: if the person moved the checkbox, it is theirs
-        // and we write neither cell. Writing both to one value here relabelled their tick as
-        // ours, and the next run then cleared it.
-        const sheetReview = row.cells['Human Review'] === true;
-        const ourReview = state.items[id]?.lastWrittenHumanReview
-          ?? (typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined);
-        const humanOwns = ourReview !== undefined && sheetReview !== ourReview;
+        // The SAME rule as the present-item paths - not a second copy of it. Selecting one
+        // baseline with `??` here let a stale cache hide a disagreeing mirror (and vice versa),
+        // which overwrote a human clear on one path and a human tick on the other.
+        const absentRule = reviewRule(
+          row.cells['Human Review'] === true,
+          state.items[id]?.lastWrittenHumanReview,
+          typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
+        );
         changes.push({
           action: 'missing',
           item: { itemId: id, item: String(row.cells['Item'] ?? id) } as ProjectItem,
           rowId: row.rowId,
-          cells: { 'Sync Status': 'Missing in Repo', ...(humanOwns ? {} : reviewCells(false)), 'Last Synced': now },
+          cells: { 'Sync Status': 'Missing in Repo', ...absentRule.write(false), 'Last Synced': now },
           reasons: ['conflict resolved by a human; the item is still gone from the repository'],
         });
       }
@@ -274,11 +331,11 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // `Repo Review` must move with `Human Review` when WE tick it - otherwise the next run
     // reads our own tick as a human edit and strands it. But if the box is already ticked we
     // write neither, so a person's tick stays theirs.
-    const sheetReviewNow = row.cells['Human Review'] === true;
-    const ourReviewNow = state.items[id]?.lastWrittenHumanReview
-      ?? (typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined);
-    const humanOwnsNow = ourReviewNow !== undefined && sheetReviewNow !== ourReviewNow;
-    const reviewWrite: CellValues = humanOwnsNow ? {} : reviewCells(true);
+    const reviewWrite: CellValues = reviewRule(
+      row.cells['Human Review'] === true,
+      state.items[id]?.lastWrittenHumanReview,
+      typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
+    ).write(true);
     changes.push({ action: 'missing', item: ghost, rowId: row.rowId, cells: { 'Sync Status': label, ...reviewWrite, 'Last Synced': now }, reasons: [wasConflict ? 'item no longer found in repository; the unresolved conflict is kept too' : 'item no longer found in repository; row kept for a human to close or merge'] });
     }
   }
@@ -322,8 +379,9 @@ export async function applyPlan(plan: SyncPlan, target: SheetTarget, state: Sync
       // remember() - but when it ticks the review box it MUST record that it did, or the
       // cache goes stale and the next run reads our own tick as a human edit.
       const st = state.items[c.item.itemId];
-      if (st && (c.cells as CellValues)['Human Review'] !== undefined) {
-        st.lastWrittenHumanReview = (c.cells as CellValues)['Human Review'] === true;
+      const wrote = (c.cells as CellValues)['Human Review'] ?? (c.cells as CellValues)['Repo Review'];
+      if (st && wrote !== undefined) {
+        st.lastWrittenHumanReview = wrote === true;
         st.lastSyncedAt = now;
       }
     }
@@ -341,9 +399,14 @@ function remember(state: SyncState, c: PlannedChange, rowId: number, now: string
     // Not dead state: this is the baseline that tells OUR checkbox from a human's. It may
     // only move when we ACTUALLY wrote the cell - recording `false` because we deliberately
     // left the cell alone would erase the very ownership we were trying to preserve.
-    lastWrittenHumanReview: (c.cells as CellValues)['Human Review'] === undefined
-      ? state.items[c.item.itemId]?.lastWrittenHumanReview
-      : (c.cells as CellValues)['Human Review'] === true,
+    // Only move when we ACTUALLY wrote something: recording a value we deliberately left
+    // alone would erase the ownership we were preserving. A write of `Repo Review` on its own
+    // is the adopt case - the baseline moves, the visible checkbox does not.
+    lastWrittenHumanReview: (c.cells as CellValues)['Human Review'] !== undefined
+      ? (c.cells as CellValues)['Human Review'] === true
+      : (c.cells as CellValues)['Repo Review'] !== undefined
+        ? (c.cells as CellValues)['Repo Review'] === true
+        : state.items[c.item.itemId]?.lastWrittenHumanReview,
     lastSyncedAt: now,
   };
 }

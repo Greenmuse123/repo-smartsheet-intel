@@ -767,3 +767,88 @@ describe('neither baseline may be trusted alone (round-7 R7-04)', () => {
     expect(target.rows[0].cells['Human Review']).toBe(false);
   });
 });
+
+describe('round-8 review regressions', () => {
+  const T4 = '2026-08-24T13:00:00Z';
+  const risk = (over: Partial<RawEvidence> = {}): RawEvidence => ({
+    extractor: 'risk-heuristics', sourceType: 'Risk heuristic', path: 'src/auth/session.js',
+    line: 5, excerpt: 'FIXME in a security-sensitive file: sessions never expire', ...over,
+  });
+
+  it('adopts a row created before the Item ID was widened, keeping the human columns (R8-04)', async () => {
+    // Widening the digest changes every identity. Without adoption the next sync would add a
+    // second row for every item, mark all the originals Missing in Repo, and strand the Owner,
+    // Priority and Management Notes a person had put on them.
+    const e = ev('src/a.js', 'one');
+    const [item] = items(e);
+    const legacy = item.legacyItemIds![0];
+    expect(legacy).not.toBe(item.itemId);
+    expect(legacy.length).toBeLessThan(item.itemId.length);
+
+    // A sheet as an older build left it: the short ID, plus a person's own columns.
+    await run(items(e), T1);
+    const row = target.rows[0];
+    row.cells['Item ID'] = legacy;
+    Object.assign(row.cells, { Priority: 'High', Owner: 'pm@example.com', 'Management Notes': 'ask Sam' });
+    state = { version: 1, sheetId: 'sheet-1', items: {} };
+
+    const p = await run(items(e), T2);
+    expect(p.counts.create).toBe(0);          // no duplicate row
+    expect(p.counts.missing).toBe(0);         // and the original is not declared missing
+    expect(target.rows).toHaveLength(1);
+    expect(target.rows[0].cells['Item ID']).toBe(item.itemId);   // identity rewritten in place
+    expect(target.rows[0].cells).toMatchObject({ Priority: 'High', Owner: 'pm@example.com', 'Management Notes': 'ask Sam' });
+  });
+
+  it('uses one baseline rule on the absent paths too (R8-01)', async () => {
+    // The two absent-item paths selected a single baseline with `??`, so a stale cache hid a
+    // disagreeing mirror and the missing write overwrote a human clear.
+    const other = ev('src/other.js', 'keep me');
+    await run(normalize([risk(), other]), T1);
+    const id = normalize([risk()])[0].itemId;
+    const row = target.rows.find((r) => r.cells['Item ID'] === id)!;
+    row.cells['Human Review'] = false;                 // a person clears our flag
+    row.cells['Repo Review'] = true;                   // the mirror still says the tick was ours
+    state.items[id].lastWrittenHumanReview = false;    // but the cache disagrees with the mirror
+
+    await run(normalize([other]), T2);                 // the item vanishes
+    expect(row.cells['Sync Status']).toBe('Missing in Repo');
+    expect(row.cells['Human Review']).toBe(false);     // their clear is not overwritten
+  });
+
+  it('never writes the checkbox when there is no baseline at all (R8-02)', async () => {
+    // With no baseline the code claimed to preserve the current value but wrote it anyway and
+    // recorded it as tool-authored, so a later repo change reversed a real decision.
+    await run(items(ev('src/a.js', 'one')), T1);
+    const row = target.rows[0];
+    row.cells['Human Review'] = true;                  // a person ticks it
+    delete row.cells['Repo Review'];                   // no mirror
+    state = { version: 1, sheetId: 'sheet-1', items: {} };  // and no cache
+
+    await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
+    expect(row.cells['Human Review']).toBe(true);      // untouched
+    expect(row.cells['Repo Review']).toBeUndefined();  // and NOT adopted as ours
+    await run(items(ev('src/a.js', 'one', { commit: 'def5678' })), T3);
+    expect(row.cells['Human Review']).toBe(true);      // adopting it would only have delayed
+    expect(row.cells['Repo Review']).toBeUndefined();  // the loss by exactly one run
+  });
+
+  it('recovers from technical drift instead of suppressing a required flag forever (R8-03)', async () => {
+    // Two baselines that disagree with EACH OTHER cannot both be right, and that is not a
+    // human edit. Previously any disagreement meant "human owns it", so an accidentally stale
+    // mirror could stop the tool ever flagging a row its own model says needs review.
+    await run(normalize([risk()]), T1);
+    const row = target.rows[0];
+    const id = normalize([risk()])[0].itemId;
+    row.cells['Human Review'] = false;                 // nobody edited this; it is just off
+    state.items[id].lastWrittenHumanReview = false;    // the cache agrees
+    row.cells['Repo Review'] = true;                   // the mirror has drifted
+
+    await run(normalize([risk({ commit: 'abc1234' })]), T2);  // run 1: re-point the baselines
+    expect(row.cells['Human Review']).toBe(false);     // the visible value is preserved
+    expect(row.cells['Repo Review']).toBe(false);      // drift resolved
+
+    await run(normalize([risk({ commit: 'def5678' })]), T3);  // run 2: normal rules resume
+    expect(row.cells['Human Review']).toBe(true);      // and the required flag is applied again
+  });
+});

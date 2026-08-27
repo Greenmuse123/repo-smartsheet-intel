@@ -40,9 +40,27 @@ export function identityKey(ev: RawEvidence): string {
  */
 const ID_HEX = 12;
 
+/** Digest lengths this tool has ever published, newest first. Used to adopt older rows. */
+const LEGACY_ID_HEX = [8];
+
 export function itemIdFor(ev: RawEvidence): string {
   const h = createHash('sha1').update(identityKey(ev)).digest('hex').slice(0, ID_HEX);
   return `RSI-${CODE[ev.extractor] ?? 'XX'}-${h}`;
+}
+
+/**
+ * The Item IDs older versions of this tool would have given the same evidence.
+ *
+ * Widening the digest changes every identity, and without this a sheet synced by an older
+ * build would grow a second row for every item, mark all the originals `Missing in Repo`, and
+ * strand the Owner, Priority and Management Notes a person had put on them. Instead the
+ * planner adopts the old row and rewrites its `Item ID` in place - the human columns are never
+ * touched, so they simply carry over.
+ */
+export function legacyItemIdsFor(ev: RawEvidence): string[] {
+  const full = createHash('sha1').update(identityKey(ev)).digest('hex');
+  const code = CODE[ev.extractor] ?? 'XX';
+  return LEGACY_ID_HEX.map((n) => `RSI-${code}-${full.slice(0, n)}`);
 }
 
 /**
