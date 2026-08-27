@@ -13,7 +13,7 @@
  *       place a Status is asserted rather than read.
  */
 import type { Confidence, ItemType, Priority, ProjectItem, RawEvidence, Status } from './types.js';
-import { fingerprintOf, identityKey, itemIdFor, legacyItemIdsFor } from './ids.js';
+import { fingerprintOf, identityKey, itemIdFor } from './ids.js';
 import { redact, redactPath } from '../scanner/secrets.js';
 import type { OwnerRule } from '../extractors/codeowners.js';
 import { ownerFor } from '../extractors/codeowners.js';
@@ -102,7 +102,6 @@ export function normalize(evidence: RawEvidence[], opts: NormalizeOptions = {}):
     const sourceReference = `${shownPath}${ev.line ? `:${ev.line}` : ''} - ${ev.sourceType}${ev.refs?.length ? ` (refs ${ev.refs.join(', ')})` : ''}`;
     const partial: Omit<ProjectItem, 'fingerprint'> = {
       itemId,
-      legacyItemIds: legacyItemIdsFor(rawEv),
       component: redact(componentOf(raw.path)).text,
       repositoryPath: shownPath,
       sourceReference,

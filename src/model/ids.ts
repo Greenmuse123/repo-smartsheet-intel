@@ -40,9 +40,15 @@ export function identityKey(ev: RawEvidence): string {
  */
 const ID_HEX = 12;
 
-/** Digest lengths this tool has ever published, newest first. Used to adopt older rows. */
-const LEGACY_ID_HEX = [8];
-
+/*
+ * There is deliberately no way to match a row written under an OLDER Item ID.
+ *
+ * It existed, and was defeated every time it was hardened: displayed text is clipped, several
+ * items share a file, an old 32-bit digest can collide, and redaction makes two different items
+ * identical on purpose. Nothing a sheet stores reliably says which item an old row belongs to,
+ * and attaching one person's Owner and Management Notes to the wrong work cannot be undone.
+ * Upgrading therefore creates fresh rows and flags the old ones "Missing in Repo", intact.
+ */
 export function itemIdFor(ev: RawEvidence): string {
   const h = createHash('sha1').update(identityKey(ev)).digest('hex').slice(0, ID_HEX);
   return `RSI-${CODE[ev.extractor] ?? 'XX'}-${h}`;
@@ -63,34 +69,6 @@ export function itemIdFor(ev: RawEvidence): string {
  */
 const PATH_KEYED = new Set(['ci', 'tests', 'adr']);
 
-/** Is this item's identity the path alone, rather than path + text? */
-export function isPathKeyed(itemId: string): boolean {
-  const code = itemId.split('-')[1] ?? '';
-  return [...PATH_KEYED].some((e) => CODE[e] === code);
-}
-
-export function legacyItemIdsFor(ev: RawEvidence): string[] {
-  const code = CODE[ev.extractor] ?? 'XX';
-  const full = createHash('sha1').update(identityKey(ev)).digest('hex');
-  const out = new Set(LEGACY_ID_HEX.map((n) => `RSI-${code}-${full.slice(0, n)}`));
-  out.delete(`RSI-${code}-${full.slice(0, ID_HEX)}`);
-  return [...out];
-}
-
-/*
- * A note on what is deliberately NOT here.
- *
- * Identity used to be computed from the REDACTED evidence, so an item whose text or path
- * contains a secret has a different published ID on a sheet synced by an older build. Offering
- * that older ID as an alias would let such rows be adopted - but redaction is exactly the
- * operation that makes two different items identical, so those aliases cannot tell them apart,
- * and neither can anything else on the sheet: two items that redact alike share the alias, the
- * published Source AND the fingerprint.
- *
- * Adopting on that basis would silently move one person's Owner and Management Notes onto the
- * wrong work. Refusing costs a fresh row and a "Missing in Repo" flag on the old one, with
- * every human value still sitting on it, which a person can merge. That trade is not close.
- */
 
 /**
  * Fields whose change means "the repository moved". Deliberately excludes `sourceReference`

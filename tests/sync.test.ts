@@ -9,6 +9,9 @@ import { log } from '../src/log/logger.js';
 
 log.silent();
 
+/** The Item ID an older build would have written: the same digest, cut to 8 hex characters. */
+const oldStyleId = (itemId: string): string => itemId.slice(0, itemId.lastIndexOf('-') + 9);
+
 const todoFor = (path: string): RawEvidence => ({ extractor: 'todo-comments', sourceType: 'TODO comment', path, line: 10, excerpt: 'TODO: add retry' });
 const ev = (path: string, text: string, over: Partial<RawEvidence> = {}): RawEvidence => ({ extractor: 'todo-comments', sourceType: 'TODO comment', path, line: 1, excerpt: `TODO: ${text}`, ...over });
 const items = (...e: RawEvidence[]): ProjectItem[] => normalize(e);
@@ -872,10 +875,10 @@ describe('round-10 review regressions', () => {
     const [item] = items(e);
     await run(items(e), T1);
     const row = target.rows[0];
-    row.cells['Item ID'] = item.legacyItemIds![0];
+    row.cells['Item ID'] = oldStyleId(item.itemId);
     row.cells['Repo Review'] = false;
     row.cells['Human Review'] = true;                       // a person ticks the legacy row
-    state.items[item.legacyItemIds![0]] = { ...state.items[item.itemId], lastWrittenHumanReview: false };
+    state.items[oldStyleId(item.itemId)] = { ...state.items[item.itemId], lastWrittenHumanReview: false };
     state.items[item.itemId] = { ...state.items[item.itemId], lastWrittenHumanReview: true }; // stale, deleted row
 
     await run(items(e), T2);
@@ -987,7 +990,7 @@ describe('round-12 review regressions', () => {
     const [ia] = normalize([a]);
     await run(normalize([b]), T1);                          // the sheet holds B
     const row = target.rows[0];
-    row.cells['Item ID'] = ia.legacyItemIds![0];            // wearing A's older ID
+    row.cells['Item ID'] = oldStyleId(ia.itemId);            // wearing A's older ID
     row.cells['Owner'] = 'owner-of-b@example.com';
 
     const p = await run(normalize([a]), T2);
@@ -1037,7 +1040,7 @@ describe('the tool never guesses which old row belongs to which item (round-15)'
     const [item] = items(e);
     await run(items(e), T1);
     const row = target.rows[0];
-    row.cells['Item ID'] = item.legacyItemIds![0];         // as an older build left it
+    row.cells['Item ID'] = oldStyleId(item.itemId);         // as an older build left it
     row.cells['Owner'] = 'human@example.com';
     row.cells['Management Notes'] = 'mine';
     state = { version: 1, sheetId: 'sheet-1', items: {} };
@@ -1091,4 +1094,70 @@ describe('a raise is dismissible, and stays dismissed (round-15 R15-03)', () => 
     await run(normalize([risk({ commit: 'def5678' })]), '2026-08-24T13:00:00Z');
     expect(row.cells['Human Review']).toBe(false);         // and it stays dismissed
   });
+});
+
+describe('round-16 review regressions', () => {
+  const risk = (over: Partial<RawEvidence> = {}): RawEvidence => ({
+    extractor: 'risk-heuristics', sourceType: 'Risk heuristic', path: 'src/auth/session.js',
+    line: 5, excerpt: 'FIXME in a security-sensitive file: sessions never expire', ...over,
+  });
+
+  it('refuses a different-file row even when it carries no fingerprint (R16-01)', async () => {
+    // The guard was gated on a populated Repo Fingerprint, so an imported or hand-made row -
+    // exactly the kind that has none - could still be overwritten with another item's content
+    // while its Owner and Management Notes stayed attached to it.
+    await run(items(ev('src/elsewhere.js', 'other')), T1);
+    const row = target.rows[0];
+    const [mine] = items(ev('src/a.js', 'one'));
+    row.cells['Item ID'] = mine.itemId;
+    delete row.cells['Repo Fingerprint'];                  // as an imported row would be
+    row.cells['Owner'] = 'someone@example.com';
+    const before = { ...row.cells };
+
+    const p = await run(items(ev('src/a.js', 'one')), T2);
+    expect(p.counts.update).toBe(0);
+    expect(row.cells['Item']).toBe(before['Item']);        // untouched
+    expect(row.cells['Owner']).toBe('someone@example.com');
+  });
+
+  it('leaves a blank-Source row to the normal path (R16-01)', async () => {
+    // A row with no Source says nothing about which item it is, so the guard must not fire.
+    await run(items(ev('src/a.js', 'one')), T1);
+    const row = target.rows[0];
+    delete row.cells['Source'];
+    const p = await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
+    expect(p.counts.update).toBe(1);
+    expect(row.cells['Source']).toBeDefined();             // and it gets repaired
+  });
+
+  it('treats a dismissal as final from every baseline history (R16-02)', async () => {
+    // Ending the raise when the person unticked the box was not a dismissal: with the baselines
+    // sitting at false the ownership rule saw them agreeing with the now-empty box, called it
+    // ours, and re-ticked it on any item the model wants reviewed. Ten of the thirty-six
+    // histories did that, so the fixture has to walk them rather than pick a lucky one.
+    for (const cache of [undefined, false, true]) {
+      for (const mirror of [undefined, false, true]) {
+        target = new MemoryTarget(COLUMN_TITLES, 'sheet-1');
+        state = { version: 1, sheetId: 'sheet-1', items: {} };
+        await run(normalize([risk()]), T1);
+        const row = target.rows[0];
+        const id = normalize([risk()])[0].itemId;
+
+        row.cells['Repo Status'] = 'Done';                 // stale mirror
+        row.cells['Status'] = 'In Progress';               // and somebody disagrees
+        if (mirror === undefined) delete row.cells['Repo Review']; else row.cells['Repo Review'] = mirror;
+        if (state.items[id]) state.items[id].lastWrittenHumanReview = cache;
+
+        await run(normalize([risk()]), T2);
+        expect(row.cells['Human Review'], `raised with cache=${cache} mirror=${mirror}`).toBe(true);
+
+        row.cells['Human Review'] = false;                 // the person dismisses it
+        for (const commit of ['abc1234', 'def5678', 'aaa9999']) {
+          await run(normalize([risk({ commit })]), T3);
+          expect(row.cells['Human Review'], `after ${commit}, cache=${cache} mirror=${mirror}`).toBe(false);
+        }
+      }
+    }
+  });
+
 });

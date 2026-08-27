@@ -10,10 +10,9 @@
  * Use:  `const plan = planSync(items, rows, state, now)`; `await applyPlan(plan, target, state, now)`.
  */
 import type { PlannedChange, ProjectItem, Status, SyncPlan, SyncStatus } from '../model/types.js';
-import { humanSeedCells, repoCells, reviewCells, sharedCells, trunc } from '../adapters/smartsheet/mapper.js';
+import { humanSeedCells, repoCells, reviewCells, sharedCells } from '../adapters/smartsheet/mapper.js';
 import type { SheetTarget, TargetRow, CellValues } from './target.js';
 import type { SyncState } from './state.js';
-import { isPathKeyed } from '../model/ids.js';
 import { log } from '../log/logger.js';
 
 /**
@@ -112,7 +111,11 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       continue;
     }
     const row = byItemId.get(item.itemId);
-    if (row && !sameSourcePath(String(row.cells['Source'] ?? ''), item.repositoryPath) && String(row.cells['Repo Fingerprint'] ?? '') !== '') {
+    // Gate on the Source column, not on the fingerprint: a row can carry a Source and no
+    // fingerprint (imported, hand-made, or written by something else), and requiring a
+    // fingerprint let exactly those rows be overwritten while their Owner and Notes stayed on
+    // them. A blank Source says nothing either way, so it is left to the normal path.
+    if (row && String(row.cells['Source'] ?? '') !== '' && !sameSourcePath(String(row.cells['Source'] ?? ''), item.repositoryPath)) {
       // The row carries this Item ID but points at a different file. Identity always includes
       // the path, so this cannot be the same item: the ID was hand-edited, or two identities
       // collided. Either way, writing this item's content over that row would destroy whatever
@@ -187,9 +190,16 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // the sheet says now. If any of them disagrees, someone moved it and it is theirs. That is
     // conservative in the one direction that matters - a stale flag costs somebody a glance, a
     // cleared one loses a decision silently.
-    // While a raise is outstanding the checkbox is not ours to touch. If the person has since
-    // unticked it, the raise is over and their decision is what the ownership rule then sees.
-    const raiseOutstanding = stForReview?.reviewRaisedForHuman === true && sheetReview;
+    // Once we have raised something on this row, the checkbox belongs to the person from then
+    // on and we never write it again - ticked or not. Ending the raise when they untick it was
+    // not a dismissal at all: the ownership rule then found the baselines agreeing with the now
+    // empty box, called it ours, and re-ticked it on any item the model wants reviewed. A
+    // dismissal has to be permanent to mean anything.
+    //
+    // The cost is that this tool cannot flag that row again by itself, which is the same trade
+    // made for rows with no baseline at all: a stale flag costs a glance, an unwanted one that
+    // keeps coming back costs trust.
+    const raiseOutstanding = stForReview?.reviewRaisedForHuman === true;
     const rule = raiseOutstanding
       ? { baseline: undefined as boolean | undefined, humanOwns: true, drift: false, write: () => ({}) }
       : reviewRule(
@@ -511,12 +521,10 @@ export async function applyPlan(plan: SyncPlan, target: SheetTarget, state: Sync
   return { created, updated };
 }
 
-/** Was a raise outstanding on this row, and has nobody dismissed it yet? */
+/** Has this row ever been raised with a person? Once true it stays true - see `raiseOutstanding`. */
 function raiseStillStanding(state: SyncState, c: PlannedChange, rowId: number): boolean {
   const prev = state.items[c.item.itemId];
-  if (!prev || prev.rowId !== rowId || prev.reviewRaisedForHuman !== true) return false;
-  // A write that unticks the box is us agreeing the raise is over; anything else leaves it up.
-  return (c.cells as CellValues)['Human Review'] !== false;
+  return prev !== undefined && prev.rowId === rowId && prev.reviewRaisedForHuman === true;
 }
 
 function remember(state: SyncState, c: PlannedChange, rowId: number, now: string): void {

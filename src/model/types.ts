@@ -53,11 +53,6 @@ export interface RawEvidence {
 /** A normalized, traceable project fact. */
 export interface ProjectItem {
   itemId: string;
-  /**
-   * Item IDs earlier versions of this tool would have produced for the same evidence. Not
-   * written to the sheet - used only to adopt a row created before the digest was widened.
-   */
-  legacyItemIds?: string[];
   item: string;
   type: ItemType;
   description: string;
