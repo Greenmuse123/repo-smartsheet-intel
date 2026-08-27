@@ -1046,19 +1046,26 @@ describe('round-10 review regressions', () => {
     // An earlier version declared a conflict here. That trusted the stale mirror over a cache
     // holding the true last value and turned ordinary rows into conflicts that then stuck. With
     // the repository provably still, a human on a different Status is simply ahead of it.
-    await run(normalize([risk()]), T1);
+    // Use an item that does NOT ask for review, so the flag can only come from this repair.
+    await run(items(ev('src/a.js', 'one')), T1);
     const row = target.rows[0];
-    row.cells['Repo Status'] = 'Not Started';               // stale mirror
+    expect(row.cells['Human Review']).toBe(false);
+    row.cells['Repo Status'] = 'Done';                      // stale mirror
     row.cells['Status'] = 'In Progress';                    // a person is ahead of the repo
     row.cells['Sync Status'] = 'Synced';
 
-    const p = await run(normalize([risk()]), T2);
+    const p = await run(items(ev('src/a.js', 'one')), T2);
     expect(p.counts.conflict).toBe(0);                      // no invented conflict
-    expect(row.cells['Repo Status']).toBe('Unknown');       // the mirror is repaired
+    expect(row.cells['Repo Status']).toBe('Not Started');   // the mirror is repaired
     expect(row.cells['Status']).toBe('In Progress');        // their value is untouched
-    expect(p.changes[0].reasons.join(' ')).toMatch(/stale Repo Status/);
+    expect(p.changes[0].reasons.join(' ')).toMatch(/Repaired the stale value and flagged the row/);
+    expect(row.cells['Human Review']).toBe(true);           // a person is told, never silently chosen for
 
-    const p2 = await run(normalize([risk()]), T3);
+    // ...and the warning is not cleared by our own next run - only a person can dismiss it.
+    await run(items(ev('src/a.js', 'one')), '2026-08-24T13:00:00Z');
+    expect(row.cells['Human Review']).toBe(true);
+
+    const p2 = await run(items(ev('src/a.js', 'one')), T3);
     expect(p2.counts.unchanged).toBe(1);                    // and it settles, never sticks
   });
 
@@ -1163,11 +1170,10 @@ describe('round-11 review regressions', () => {
 });
 
 describe('round-12 review regressions', () => {
-  it('adopts a long item whose stored text was clipped on the way to the cell (R12)', async () => {
-    // Cells are clipped at 3900 characters. Comparing the row against the RAW item text
-    // rejected a legitimate migration of any long item, because the sheet can only ever hold
-    // the clipped form. Compare against what we would actually write.
-    // A manifest with many dependencies produces an Item far longer than a cell can hold.
+  it('adopts a long clipped item when the content itself has not changed (R12)', async () => {
+    // Cells clip at 3900 characters, so a long item exists on the sheet only in clipped form.
+    // Its fingerprint is unaffected by that, which is exactly why the fingerprint - not the
+    // displayed text - is what proves the row is this item.
     const deps = Array.from({ length: 400 }, (_, i) => `pkg-${i}@1.0.0`).join(', ');
     const e: RawEvidence = { extractor: 'manifests', sourceType: 'Declared dependency', path: 'package.json', line: 1, section: 'deps', excerpt: deps };
     const [item] = normalize([e]);
@@ -1178,13 +1184,28 @@ describe('round-12 review regressions', () => {
     row.cells['Owner'] = 'human@example.com';
     state = { version: 1, sheetId: 'sheet-1', items: {} };
 
-    // Make the repository move as well, so the fingerprint no longer matches and the check has
-    // to fall through to comparing the text - which on the sheet exists only in clipped form.
-    const moved = { ...e, commit: 'abc1234' };
-    const p = await run(normalize([moved]), T2);
+    const p = await run(normalize([e]), T2);
     expect(p.counts.create).toBe(0);                       // adopted, not duplicated
     expect(row.cells['Item ID']).toBe(item.itemId);
     expect(row.cells['Owner']).toBe('human@example.com');
+  });
+
+  it('refuses to adopt when the content changed too, rather than guessing (R13)', async () => {
+    // With the content changed in the same run there is no proof the row is this item, and
+    // adopting hands one item another person's Owner and Notes. A fresh row plus a Missing flag
+    // on the old one is honest and a person can merge it; a silent guess cannot be undone.
+    const e = ev('src/a.js', 'one');
+    const [item] = items(e);
+    await run(items(e), T1);
+    const row = target.rows[0];
+    row.cells['Item ID'] = item.legacyItemIds![0];
+    row.cells['Owner'] = 'human@example.com';
+    state = { version: 1, sheetId: 'sheet-1', items: {} };
+
+    const p = await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
+    expect(p.counts.create).toBe(1);                       // a fresh row...
+    expect(p.counts.missing).toBe(1);                      // ...and the old one is flagged
+    expect(row.cells['Owner']).toBe('human@example.com');  // their column is never moved
   });
 
   it('will not hand one item the row of another that merely displays the same text (R12)', async () => {
@@ -1202,5 +1223,53 @@ describe('round-12 review regressions', () => {
     const p = await run(normalize([a]), T2);
     expect(p.counts.create).toBe(1);                        // A gets its own row
     expect(row.cells['Owner']).toBe('owner-of-b@example.com');
+  });
+});
+
+describe('round-13 review regressions', () => {
+  it('recognises the ID an older build gave a secret-bearing item (R13)', async () => {
+    // Identity used to be computed from the REDACTED evidence. Moving it to the original text
+    // changed the published ID of every item containing a secret, so a sheet synced by an
+    // older build held them under IDs this build no longer recognised - stranding the Owner,
+    // Priority and Notes a person had put on those rows.
+    const e: RawEvidence = {
+      extractor: 'todo-comments', sourceType: 'TODO comment', path: 'src/a.ts', line: 1,
+      excerpt: 'TODO: rotate token=abcdefghijkl before launch',
+    };
+    const [item] = normalize([e]);
+    await run(normalize([e]), T1);
+    const row = target.rows[0];
+
+    // What the previous build would have published: the identity taken from redacted text.
+    const redacted: RawEvidence = { ...e, excerpt: String(row.cells['Description'] ?? '') };
+    const legacyFromRedacted = item.legacyItemIds!.filter((id) => id !== item.itemId);
+    expect(legacyFromRedacted.length).toBeGreaterThan(1); // both bases, both digest lengths
+
+    row.cells['Item ID'] = legacyFromRedacted.find((id) => id.length === item.itemId.length)!;
+    row.cells['Owner'] = 'human@example.com';
+    state = { version: 1, sheetId: 'sheet-1', items: {} };
+
+    const p = await run(normalize([e]), T2);
+    expect(p.counts.create).toBe(0);                       // recognised, not re-created
+    expect(row.cells['Item ID']).toBe(item.itemId);
+    expect(row.cells['Owner']).toBe('human@example.com');
+    expect(JSON.stringify(target.rows)).not.toContain('abcdefghijkl'); // still never published
+    void redacted;
+  });
+
+  it('will not adopt a same-fingerprint row that belongs to a different file (R13)', async () => {
+    // The fingerprint excludes the line number and is not unique on its own, so it was possible
+    // to hand a row from another file to this item purely on a fingerprint match.
+    const a = ev('src/a.js', 'one');
+    const [ia] = items(a);
+    await run(items(ev('src/elsewhere.js', 'one')), T1);
+    const row = target.rows[0];
+    row.cells['Item ID'] = ia.legacyItemIds![0];
+    row.cells['Repo Fingerprint'] = ia.fingerprint;        // same fingerprint, different file
+    row.cells['Owner'] = 'owner-elsewhere@example.com';
+
+    const p = await run(items(a), T2);
+    expect(p.counts.create).toBe(1);
+    expect(row.cells['Owner']).toBe('owner-elsewhere@example.com');
   });
 });

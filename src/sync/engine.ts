@@ -89,20 +89,24 @@ function sameSourcePath(source: string, repositoryPath: string): boolean {
  * legitimately change (a renamed CI job) and only the file can be compared.
  */
 function looksLikeSameItem(row: TargetRow, item: ProjectItem): boolean {
-  // The strongest possible signal: the row still carries the fingerprint this item computes to,
-  // so it IS this item and nothing about it has changed since the last sync.
-  if (String(row.cells['Repo Fingerprint'] ?? '') === item.fingerprint) return true;
-  if (isPathKeyed(item.itemId)) {
-    return sameSourcePath(String(row.cells['Source'] ?? ''), item.repositoryPath);
-  }
-  // Compare against the value we would actually WRITE, not the raw one: long text is clipped on
-  // the way to a cell, so a legitimate migration of a long item was being rejected for
-  // differing from its own stored form.
-  const stored = String(row.cells['Item'] ?? '');
-  if (stored !== String(trunc(item.item) ?? '')) return false;
-  // Displayed text can be shortened, so two different items CAN show the same Item. Require the
-  // file to agree as well before handing one item's row - and its human columns - to another.
-  return sameSourcePath(String(row.cells['Source'] ?? ''), item.repositoryPath);
+  // Adopting a row hands one item another's Owner, Priority and Management Notes, so this asks
+  // for PROOF, not resemblance. Every weaker test tried here was defeated by two items that
+  // look alike on the sheet: displayed text is clipped, several items share a file, and an old
+  // digest can collide. None of those can be told apart from what a row actually shows.
+  //
+  // The fingerprint is the only sheet value that is a function of the item's whole content, so
+  // it is the proof - paired with the file, since a fingerprint excludes the line number and is
+  // therefore not unique on its own. When the content ALSO changed in the same run there is no
+  // proof left, and the honest outcome is a fresh row plus a "Missing in Repo" flag on the old
+  // one, which a person can merge, rather than a silent guess that attaches their notes to the
+  // wrong work.
+  // For CI, tests and ADR the identity IS the path, so two of them can never share a file and
+  // the Source column alone proves which item a row is - even if its displayed text was
+  // renamed in the same run. Every other extractor puts several items in one file, so the path
+  // proves nothing on its own and the fingerprint has to carry it.
+  if (!sameSourcePath(String(row.cells['Source'] ?? ''), item.repositoryPath)) return false;
+  if (isPathKeyed(item.itemId)) return true;
+  return String(row.cells['Repo Fingerprint'] ?? '') === item.fingerprint;
 }
 
 export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncState, now: string): SyncPlan {
@@ -323,12 +327,30 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
         // trusted the stale mirror over a cache that recorded the true last value, and turned
         // ordinary rows into conflicts that then stuck. With the repository provably still, a
         // human sitting on a different Status is just ahead of it, which is normal.
+        // A current fingerprint says the repository did not move, but it is not proof that the
+        // row's history was atomic: an interrupted or imported write could have set the
+        // fingerprint while leaving the old baseline behind, and then a real disagreement is
+        // sitting in front of us wearing the same clothes as ordinary drift. We cannot tell
+        // them apart - so repair quietly ONLY when nobody is disagreeing, and otherwise repair
+        // and put it in front of a person instead of silently choosing an interpretation.
+        const somebodyDisagrees = sheetStatus !== '' && sheetStatus !== item.status;
         changes.push({
           action: 'update',
           item,
           rowId: row.rowId,
-          cells: { 'Repo Status': item.status, 'Last Synced': now },
-          reasons: [`repaired a stale Repo Status: the sheet said "${lastWrittenStatus || '(none)'}" but the repository has not moved from "${item.status}"`],
+          cells: {
+            'Repo Status': item.status,
+            'Last Synced': now,
+            // Tick the box WITHOUT its mirror. That deliberately leaves the two disagreeing,
+            // which the ownership rule reads as "a person put this here" - so we will never
+            // recompute it away on the next run. A warning that clears itself one run later is
+            // no warning at all; this one stays until somebody actually dismisses it.
+            ...(somebodyDisagrees ? { 'Human Review': true } : {}),
+          },
+          reviewRaisedForHuman: somebodyDisagrees,
+          reasons: somebodyDisagrees
+            ? [`Repo Status said "${lastWrittenStatus || '(none)'}" while the repository has not moved from "${item.status}", and the sheet says "${sheetStatus}". Repaired the stale value and flagged the row: your value is kept, but check whether it still reflects reality.`]
+            : [`repaired a stale Repo Status: the sheet said "${lastWrittenStatus || '(none)'}" but the repository has not moved from "${item.status}"`],
         });
         continue;
       }
@@ -568,7 +590,11 @@ function remember(state: SyncState, c: PlannedChange, rowId: number, now: string
     // Only move when we ACTUALLY wrote something: recording a value we deliberately left
     // alone would erase the ownership we were preserving. A write of `Repo Review` on its own
     // is the adopt case - the baseline moves, the visible checkbox does not.
-    lastWrittenHumanReview: (c.cells as CellValues)['Human Review'] !== undefined
+    // A tick we raised for a person is not ours: leaving the baseline where it was makes the
+    // sheet and the baseline disagree, which is exactly how the ownership rule records "theirs".
+    lastWrittenHumanReview: c.reviewRaisedForHuman
+      ? carried
+      : (c.cells as CellValues)['Human Review'] !== undefined
       ? (c.cells as CellValues)['Human Review'] === true
       : (c.cells as CellValues)['Repo Review'] !== undefined
         ? (c.cells as CellValues)['Repo Review'] === true

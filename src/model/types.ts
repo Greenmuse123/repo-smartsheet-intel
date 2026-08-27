@@ -127,6 +127,12 @@ export interface PlannedChange {
   rowId?: number;
   /** column title -> value we intend to write */
   cells: Record<string, string | number | boolean | null>;
+  /**
+   * Set when this change ticks Human Review to raise something with a person, rather than
+   * because the item itself asks for review. The baseline is deliberately NOT moved, so the
+   * ownership rule treats the tick as theirs and we never clear it on a later run.
+   */
+  reviewRaisedForHuman?: boolean;
   reasons: string[];
 }
 

@@ -69,10 +69,21 @@ export function isPathKeyed(itemId: string): boolean {
   return [...PATH_KEYED].some((e) => CODE[e] === code);
 }
 
-export function legacyItemIdsFor(ev: RawEvidence): string[] {
-  const full = createHash('sha1').update(identityKey(ev)).digest('hex');
+export function legacyItemIdsFor(ev: RawEvidence, ...alsoFrom: RawEvidence[]): string[] {
   const code = CODE[ev.extractor] ?? 'XX';
-  return LEGACY_ID_HEX.map((n) => `RSI-${code}-${full.slice(0, n)}`);
+  const out = new Set<string>();
+  // Every identity basis this tool has ever used, at every digest length it has ever published.
+  // `alsoFrom` carries the REDACTED evidence: identity used to be computed from that, so an
+  // item whose text or path contains a secret has a different published ID on any sheet synced
+  // by an older build - and without this it would be treated as a brand new item, leaving the
+  // person's Owner, Priority and Notes stranded on a row marked "Missing in Repo".
+  for (const basis of [ev, ...alsoFrom]) {
+    const full = createHash('sha1').update(identityKey(basis)).digest('hex');
+    for (const n of [ID_HEX, ...LEGACY_ID_HEX]) out.add(`RSI-${code}-${full.slice(0, n)}`);
+  }
+  const current = `RSI-${code}-${createHash('sha1').update(identityKey(ev)).digest('hex').slice(0, ID_HEX)}`;
+  out.delete(current);
+  return [...out];
 }
 
 /**

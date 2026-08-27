@@ -102,7 +102,9 @@ export function normalize(evidence: RawEvidence[], opts: NormalizeOptions = {}):
     const sourceReference = `${shownPath}${ev.line ? `:${ev.line}` : ''} - ${ev.sourceType}${ev.refs?.length ? ` (refs ${ev.refs.join(', ')})` : ''}`;
     const partial: Omit<ProjectItem, 'fingerprint'> = {
       itemId,
-      legacyItemIds: legacyItemIdsFor(rawEv),
+      // Pass the redacted evidence too: identity used to be derived from it, so a secret-bearing
+      // item has an older published ID that must still be recognised.
+      legacyItemIds: legacyItemIdsFor(rawEv, { ...ev, path: ev.path }),
       component: redact(componentOf(raw.path)).text,
       repositoryPath: shownPath,
       sourceReference,
