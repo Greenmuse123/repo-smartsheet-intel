@@ -9,7 +9,7 @@
  */
 import type { Confidence, ItemType, Priority, ProjectItem, RawEvidence, Status } from './types.js';
 import { fingerprintOf, itemIdFor } from './ids.js';
-import { redact } from '../scanner/secrets.js';
+import { redact, redactPath } from '../scanner/secrets.js';
 import type { OwnerRule } from '../extractors/codeowners.js';
 import { ownerFor } from '../extractors/codeowners.js';
 
@@ -49,21 +49,25 @@ export function normalize(evidence: RawEvidence[], opts: NormalizeOptions = {}):
     // as TODO(alice@example.com), which becomes Owner; `path` can itself embed a credential.
     const ev: RawEvidence = {
       ...raw,
-      excerpt: redact(raw.excerpt).text,
+      excerpt: raw.excerpt === undefined ? raw.excerpt : redact(raw.excerpt).text,
       section: raw.section === undefined ? undefined : redact(raw.section).text,
-      path: redact(raw.path).text,
-      sourceType: redact(raw.sourceType).text,
+      path: raw.path === undefined ? raw.path : redactPath(raw.path),
+      sourceType: raw.sourceType === undefined ? raw.sourceType : redact(raw.sourceType).text,
       refs: raw.refs?.map((r) => redact(r).text),
     };
     const base = build(ev, opts);
     if (!base) continue;
-    const itemId = itemIdFor(ev);
+    // Identity is hashed from the ORIGINAL path. Redaction is lossy - two different files
+    // whose paths differ only inside a secret redact to the same string - so using the
+    // redacted path here would collide and `seen` would silently discard real evidence.
+    // The hash is one-way, so nothing sensitive is recoverable from the id.
+    const itemId = itemIdFor({ ...ev, path: raw.path });
     if (seen.has(itemId)) continue; // identical evidence twice (e.g. duplicated TODO text in one file)
     seen.add(itemId);
     const sourceReference = `${ev.path}${ev.line ? `:${ev.line}` : ''} - ${ev.sourceType}${ev.refs?.length ? ` (refs ${ev.refs.join(', ')})` : ''}`;
     const partial: Omit<ProjectItem, 'fingerprint'> = {
       itemId,
-      component: componentOf(ev.path),
+      component: redact(componentOf(raw.path)).text,
       repositoryPath: ev.path,
       sourceReference,
       sourceCommit: ev.commit,

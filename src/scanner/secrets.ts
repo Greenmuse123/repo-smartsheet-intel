@@ -38,6 +38,18 @@ export function looksSensitive(relPath: string): boolean {
 
 export interface RedactResult { text: string; redactions: number }
 
+/**
+ * Redacts a filesystem path one segment at a time.
+ *
+ * The generic `key=value` rule is greedy up to whitespace, so redacting a whole path would
+ * swallow the separators too: `src/token=abcdefgh/a.ts` collapses to `src/token=[REDACTED]`,
+ * losing the filename and making two different files look identical. Splitting first keeps
+ * the structure and only removes the offending segment.
+ */
+export function redactPath(path: string): string {
+  return path.split('/').map((seg) => redact(seg).text).join('/');
+}
+
 export function redact(text: string): RedactResult {
   let out = text;
   let n = 0;

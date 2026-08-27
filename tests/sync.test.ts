@@ -161,6 +161,44 @@ describe('lifecycle after the happy path', () => {
   });
 });
 
+describe('conflict state survives every path (round-2 review regressions)', () => {
+  const check = (state: 'x' | ' ', section = 'Roadmap') => ({
+    extractor: 'readme-checklist',
+    sourceType: state === 'x' ? 'Markdown checklist (checked)' : 'Markdown checklist (unchecked)',
+    path: 'README.md', line: 5, section, excerpt: 'ship it',
+  } as RawEvidence);
+
+  it('a human can resolve a conflict without the repository changing (R2-03)', async () => {
+    await run(normalize([check(' ')]), T1);
+    target.rows[0].cells['Status'] = 'Blocked';
+    await run(normalize([check('x')]), T2);                 // conflict: Blocked vs Done
+    expect(target.rows[0].cells['Sync Status']).toBe('Conflict');
+
+    target.rows[0].cells['Status'] = 'Done';                // human agrees with the repo
+    await run(normalize([check('x')]), T3);                 // repo unchanged
+    expect(target.rows[0].cells['Sync Status']).toBe('Synced');
+    expect(target.rows[0].cells['Human Review']).toBe(false);
+  });
+
+  it('an unresolved conflict is not laundered into Synced by disappearing and returning (R2-01)', async () => {
+    const other = ev('src/other.js', 'keep me');
+    await run(normalize([check(' '), other]), T1);
+    const checkId = normalize([check(' ')])[0].itemId;
+    const row = target.rows.find((r) => r.cells['Item ID'] === checkId)!;
+    row.cells['Status'] = 'Blocked';
+    await run(normalize([check('x'), other]), T2); // conflict
+    expect(row.cells['Sync Status']).toBe('Conflict');
+
+    await run(normalize([other]), T3);                       // the checklist item vanishes
+    expect(row.cells['Sync Status']).toBe('Missing in Repo');
+
+    await run(normalize([check('x'), other]), '2026-08-24T13:00:00Z'); // it returns
+    expect(row.cells['Status']).toBe('Blocked');             // human value still kept
+    expect(row.cells['Sync Status']).not.toBe('Synced');     // must NOT claim synchronized
+    expect(row.cells['Sync Status']).toBe('Conflict');
+  });
+});
+
 describe('dry run', () => {
   it('planning alone never writes to the target', async () => {
     const its = items(ev('src/a.js', 'one'));

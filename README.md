@@ -13,7 +13,7 @@ Repository → Scanner → Extractors → Normalized Project Model → Validatio
 
 - Works with **or without** Smartsheet API access (CSV fallback).
 - `sync --dry-run` shows every change before anything is written.
-- 58 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, invalid credentials, plan-restriction errors, rate-limit retries, and dry-run safety.
+- 61 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, invalid credentials, plan-restriction errors, rate-limit retries, and dry-run safety.
 
 ---
 
@@ -131,7 +131,7 @@ app/
     adapters/csv.ts          CSV + column-definitions fallback
     report/report.ts         Repository Intelligence Report
     log/logger.ts            plain-language logging
-  tests/                     vitest suites (58 tests)
+  tests/                     vitest suites (61 tests)
   examples/sample-repo/      "Orderly" demo repository + sample-repo.project-config.yaml
   docs/                      DATA-MAPPING.md · smartsheet-import.md · DEMO.md
 ```
@@ -141,7 +141,7 @@ app/
 ```
 cd app
 npm install
-npm test          # 58 tests
+npm test          # 61 tests
 npm run typecheck
 ```
 
@@ -297,4 +297,4 @@ The computer reads the sticky notes inside the toy box, copies them neatly onto 
 - **State management:** local `state.json` is a cache; `Item ID` + `Repo Fingerprint` + `Repo Status` in the sheet are sufficient to rebuild it (tested).
 - **Security:** sensitive-path gate before ignore rules, regex redaction at the excerpt boundary, env-only credentials, no repo writes.
 - **Conflict handling:** human-controlled columns written on create only; shared columns merged; conflicts keep the human value and flag.
-- **Testing:** 58 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.
+- **Testing:** 61 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.

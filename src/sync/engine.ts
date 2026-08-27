@@ -49,23 +49,47 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     const alreadyConflict = row.cells['Sync Status'] === 'Conflict';
 
     const wasMissing = row.cells['Sync Status'] === 'Missing in Repo';
+    // A disagreement is defined by the two Status values, not by the Sync Status label -
+    // the label can be stale (a row flagged Missing in Repo has lost its Conflict marker).
+    const statusesDisagree = sheetStatus !== '' && sheetStatus !== item.status;
 
-    if (!repoChanged && !wasMissing) {
-      // Nothing new from the repo. If a human resolved a conflict we leave everything alone.
-      changes.push({ action: 'unchanged', item, rowId: row.rowId, cells: {}, reasons: ['fingerprint matches'] });
-      continue;
-    }
+    if (!repoChanged) {
+      // The repository has not moved. Two things can still legitimately need a write:
+      // a row that must come back from "Missing in Repo", and a conflict a human has
+      // now resolved by making the sheet agree.
+      if (wasMissing) {
+        // Back and byte-identical. Fingerprint equality alone would say "unchanged" and
+        // leave the row flagged missing forever. If the human's Status still disagrees
+        // with the repository, this is a live conflict - never label it Synced.
+        const syncStatus: SyncStatus = statusesDisagree ? 'Conflict' : 'Synced';
+        const reason = statusesDisagree
+          ? `item reappeared, but sheet says "${sheetStatus}" and repo says "${item.status}"; kept as Conflict`
+          : 'item reappeared in the repository unchanged; clearing "Missing in Repo"';
+        changes.push({
+          action: statusesDisagree ? 'conflict' : 'update',
+          item,
+          rowId: row.rowId,
+          cells: { ...repoCells(item, syncStatus, now), ...sharedCells(sheetStatus !== '' ? (sheetStatus as Status) : item.status, statusesDisagree || item.humanReviewRequired) },
+          reasons: [reason],
+        });
+        continue;
+      }
 
-    if (!repoChanged && wasMissing) {
-      // The item is back and identical. Fingerprint equality alone would return "unchanged"
-      // and leave the row flagged Missing in Repo forever, which is simply untrue.
-      changes.push({
-        action: 'update',
-        item,
-        rowId: row.rowId,
-        cells: { ...repoCells(item, 'Synced', now), ...sharedCells(sheetStatus !== '' ? (sheetStatus as Status) : item.status, item.humanReviewRequired || Boolean(row.cells['Human Review'])) },
-        reasons: ['item reappeared in the repository unchanged; clearing "Missing in Repo"'],
-      });
+      if (alreadyConflict && !statusesDisagree) {
+        // The human resolved it by matching the repository. Nothing else changed, so this
+        // is the ONLY moment we can clear the flag - waiting for a repo change would leave
+        // the row conflicted forever.
+        changes.push({
+          action: 'update',
+          item,
+          rowId: row.rowId,
+          cells: { ...repoCells(item, 'Synced', now), ...sharedCells(item.status, item.humanReviewRequired) },
+          reasons: ['conflict resolved: the sheet now agrees with the repository'],
+        });
+        continue;
+      }
+
+      changes.push({ action: 'unchanged', item, rowId: row.rowId, cells: {}, reasons: [alreadyConflict ? 'fingerprint matches; conflict still unresolved' : 'fingerprint matches'] });
       continue;
     }
 

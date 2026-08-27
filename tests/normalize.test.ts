@@ -115,3 +115,22 @@ describe('end to end on a fixture repo', () => {
     expect(items.find((i) => i.type === 'Decision')?.status).toBe('Unknown'); // Proposed is not Done
   });
 });
+
+describe('redaction must not destroy identity (round-2 review regression)', () => {
+  it('keeps two files distinct when their paths differ only inside a secret (R2-02)', () => {
+    // Regression: redacting the whole path collapsed `src/token=abcdefgh/a.ts` and
+    // `src/token=ijklmnop/b.ts` to the same string, so the second observation was
+    // silently discarded by the `seen` de-duplication.
+    const a = todo({ path: 'src/token=abcdefgh/a.ts' });
+    const b = todo({ path: 'src/token=ijklmnop/b.ts' });
+    const out = normalize([a, b]);
+    expect(out).toHaveLength(2);
+    expect(out[0].itemId).not.toBe(out[1].itemId);
+    // ...while still never publishing the secret
+    expect(JSON.stringify(out)).not.toContain('abcdefgh');
+    expect(JSON.stringify(out)).not.toContain('ijklmnop');
+    // ...and preserving the structure a human needs to find the file
+    expect(out[0].repositoryPath).toBe('src/token=[REDACTED]/a.ts');
+    expect(out[1].repositoryPath).toBe('src/token=[REDACTED]/b.ts');
+  });
+});
