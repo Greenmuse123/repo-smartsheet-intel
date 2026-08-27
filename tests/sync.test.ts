@@ -1264,5 +1264,61 @@ describe('round-18 review regressions', () => {
     const p = await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
     expect(p.counts.update).toBe(1);
     expect(row.cells['Repo Path']).toBe('src/a.js');       // and it is filled in
+    expect(row.cells['Owner']).toBeUndefined();
+  });
+});
+
+describe('round-19 review regressions', () => {
+  it('refuses a same-ID row that has neither a recorded path nor our fingerprint (R19-01)', async () => {
+    // Treating a blank Repo Path as trustworthy left the guard switched off on exactly the
+    // sheets the column was added to protect. A blank value only means "written by an older
+    // build" if this tool wrote the row at all, and the fingerprint is what says so.
+    await run(items(ev('src/elsewhere.js', 'other')), T1);
+    const row = target.rows[0];
+    const [mine] = items(ev('src/a.js', 'one'));
+    row.cells['Item ID'] = mine.itemId;
+    delete row.cells['Repo Path'];
+    delete row.cells['Repo Fingerprint'];                  // nobody's row
+    row.cells['Owner'] = 'owner-of-other@example.com';
+    const before = { ...row.cells };
+
+    const p = await run(items(ev('src/a.js', 'one')), T2);
+    expect(p.counts.update).toBe(0);
+    expect(row.cells['Item']).toBe(before['Item']);
+    expect(row.cells['Owner']).toBe('owner-of-other@example.com');
+  });
+
+  it('backfills a path and repairs a drifted Source without touching the baselines (R19-02)', async () => {
+    // Source is excluded from the fingerprint, so it can drift with nothing noticing. Repair it
+    // narrowly: a full update here would rewrite Repo Status and Repo Fingerprint, which is how
+    // a genuine conflict was destroyed several rounds ago.
+    await run(items(ev('src/a.js', 'one')), T1);
+    const row = target.rows[0];
+    const baseline = row.cells['Repo Status'];
+    const fingerprint = row.cells['Repo Fingerprint'];
+    delete row.cells['Repo Path'];
+    row.cells['Source'] = 'stale text';
+
+    const p = await run(items(ev('src/a.js', 'one')), T2);
+    expect(Object.keys(p.changes[0].cells).sort()).toEqual(['Last Synced', 'Repo Path', 'Source']);
+    expect(row.cells['Repo Path']).toBe('src/a.js');
+    expect(row.cells['Source']).toMatch(/^src\/a\.js:/);
+    expect(row.cells['Repo Status']).toBe(baseline);       // baselines untouched
+    expect(row.cells['Repo Fingerprint']).toBe(fingerprint);
+
+    const p2 = await run(items(ev('src/a.js', 'one')), T3);
+    expect(p2.counts.unchanged).toBe(1);                   // and it settles
+  });
+
+  it('refuses a sheet that has no Repo Path column at all (R19-01)', async () => {
+    // The engine trusts a blank value as "older build". That is only safe because a sheet
+    // missing the column entirely is refused before any of it runs.
+    const titles = COLUMN_TITLES.filter((t) => t !== 'Repo Path');
+    const sheet = { id: 1, name: 's', rows: [], columns: titles.map((title, i) => ({ id: 100 + i, title, type: 'TEXT' })) };
+    const { SmartsheetClient } = await import('../src/adapters/smartsheet/client.js');
+    const { SmartsheetTarget } = await import('../src/adapters/smartsheet/target.js');
+    const fetchImpl = (async () => new Response(JSON.stringify(sheet), { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch;
+    const t = new SmartsheetTarget(new SmartsheetClient({ token: 't', fetchImpl, sleep: async () => {} }), '1');
+    await expect(t.readRows()).rejects.toMatchObject({ message: /Repo Path/ });
   });
 });

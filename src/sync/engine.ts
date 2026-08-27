@@ -96,14 +96,21 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // Compare the machine-readable `Repo Path`, never the human-readable `Source`. Source is
     // `path[:line] - evidence type`, and a filename may contain those separators, so no amount
     // of parsing tells the two apart: `src/a.ts - evil.ts` is a real file whose Source begins
-    // exactly like `src/a.ts`. A blank `Repo Path` means the row predates the column and says
-    // nothing either way, so it takes the normal path rather than being stranded.
-    if (row && String(row.cells['Repo Path'] ?? '') !== '' && String(row.cells['Repo Path']) !== item.repositoryPath) {
+    // exactly like `src/a.ts`.
+    //
+    // The column is required, so a sheet without it is refused before we ever get here. A blank
+    // VALUE still means "written by an older build", which is only believable if the row was
+    // written by this tool at all - and the fingerprint is what says so. A row with neither is
+    // nobody's, and trusting it was how the guard ended up disabled on exactly the sheets the
+    // migration was meant to protect.
+    const rowPath = String(row?.cells['Repo Path'] ?? '');
+    const rowIsOurs = String(row?.cells['Repo Fingerprint'] ?? '') !== '';
+    if (row && (rowPath === '' ? !rowIsOurs : rowPath !== item.repositoryPath)) {
       // The row carries this Item ID but points at a different file. Identity always includes
       // the path, so this cannot be the same item: the ID was hand-edited, or two identities
       // collided. Either way, writing this item's content over that row would destroy whatever
       // it actually describes, along with the Owner and Notes somebody put on it.
-      changes.push({ action: 'unchanged', item, cells: {}, reasons: [`skipped: the sheet row using Item ID ${item.itemId} is for a different file (${String(row.cells['Repo Path'] ?? '')}), so it is not this item. Fix or remove that row and re-run.`] });
+      changes.push({ action: 'unchanged', item, cells: {}, reasons: [`skipped: the sheet row using Item ID ${item.itemId} is for a different file (${rowPath || 'no recorded path, and nothing showing this tool wrote it'}), so it is not this item. Fix or remove that row and re-run.`] });
       continue;
     }
     if (!row) {
@@ -290,6 +297,24 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
           reasons: somebodyDisagrees
             ? [`Repo Status said "${lastWrittenStatus || '(none)'}" while the repository has not moved from "${item.status}", and the sheet says "${sheetStatus}". Repaired the stale value and flagged the row: your value is kept, but check whether it still reflects reality.`]
             : [`repaired a stale Repo Status: the sheet said "${lastWrittenStatus || '(none)'}" but the repository has not moved from "${item.status}"`],
+        });
+        continue;
+      }
+
+      // A row from an older build has no `Repo Path`, and Source is excluded from the
+      // fingerprint so it can drift without anything noticing. Neither is worth a full update -
+      // and a full update here would rewrite the merge baselines, which is how a real conflict
+      // got destroyed two rounds ago - so repair exactly those two cells and nothing else.
+      const backfill: CellValues = {};
+      if (rowPath !== item.repositoryPath) backfill['Repo Path'] = item.repositoryPath;
+      if (String(row.cells['Source'] ?? '') !== item.sourceReference) backfill['Source'] = item.sourceReference;
+      if (Object.keys(backfill).length) {
+        changes.push({
+          action: 'update',
+          item,
+          rowId: row.rowId,
+          cells: { ...backfill, 'Last Synced': now },
+          reasons: ['brought the recorded path and source line back into step with the repository'],
         });
         continue;
       }
