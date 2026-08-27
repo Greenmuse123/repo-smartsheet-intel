@@ -1322,3 +1322,66 @@ describe('round-19 review regressions', () => {
     await expect(t.readRows()).rejects.toMatchObject({ message: /Repo Path/ });
   });
 });
+
+describe('round-20 review regressions', () => {
+  it('does not accept anything typed into Repo Fingerprint as proof we wrote the row (R20-01)', async () => {
+    // "This tool wrote the row" has to mean the cell looks like something this tool writes.
+    // A presence check accepted a single character, which let a hand-made row with a blank
+    // path be overwritten while its Owner stayed attached to it.
+    for (const forged of ['x', 'not-a-fingerprint', '0123456789abZ']) {
+      target = new MemoryTarget(COLUMN_TITLES, 'sheet-1');
+      state = { version: 1, sheetId: 'sheet-1', items: {} };
+      await run(items(ev('src/elsewhere.js', 'other')), T1);
+      const row = target.rows[0];
+      const [mine] = items(ev('src/a.js', 'one'));
+      row.cells['Item ID'] = mine.itemId;
+      delete row.cells['Repo Path'];
+      row.cells['Repo Fingerprint'] = forged;
+      row.cells['Owner'] = 'owner-of-other@example.com';
+      const before = { ...row.cells };
+
+      const p = await run(items(ev('src/a.js', 'one')), T2);
+      expect(p.counts.update, forged).toBe(0);
+      expect(row.cells['Item'], forged).toBe(before['Item']);
+      expect(row.cells['Owner'], forged).toBe('owner-of-other@example.com');
+    }
+  });
+
+  it('writes nothing when two items claim one Item ID (R20-01)', async () => {
+    // Identities are meant to be unique, but a 48-bit digest can collide. When it does, the
+    // second item silently won and the first item's human columns stayed on work that was not
+    // theirs. Neither is written until a person separates them.
+    const a = items(ev('src/a.js', 'one'))[0];
+    const b = items(ev('src/b.js', 'two'))[0];
+    const collided: ProjectItem[] = [a, { ...b, itemId: a.itemId }];
+    await run([a], T1);
+    const row = target.rows[0];
+    const before = { ...row.cells };
+
+    const plan = planSync(collided, await target.readRows(), state, T2);
+    await applyPlan(plan, target, state, T2);
+    expect(plan.changes.every((c) => c.action === 'unchanged')).toBe(true);
+    expect(row.cells['Item']).toBe(before['Item']);
+    expect(plan.changes[0].reasons.join(' ')).toMatch(/same Item ID/);
+  });
+
+  it('does not re-plan the same Source repair forever when it is too long for a cell (R20-02)', async () => {
+    // The narrow repair compared the raw source against the stored, truncated one, so an
+    // overlong Source never matched and planned the identical write on every run.
+    const deps = Array.from({ length: 400 }, (_, i) => `pkg-${i}@1.0.0`).join(', ');
+    const e: RawEvidence = { extractor: 'manifests', sourceType: `Declared dependency ${deps}`, path: 'package.json', line: 1, section: 'deps', excerpt: deps };
+    await run(normalize([e]), T1);
+    const row = target.rows[0];
+    expect(String(row.cells['Source']).length).toBeLessThanOrEqual(3900);
+
+    delete row.cells['Repo Path'];                         // force the repair path
+    row.cells['Source'] = 'stale text';                    // and make the Source repair fire
+    const rows = await target.readRows();
+    const plan = planSync(normalize([e]), rows, state, T2);
+    // Assert the PLANNED value, not convergence: the in-memory sheet stores whatever it is
+    // handed, so it would settle either way. Smartsheet truncates, which is where the raw
+    // value never matches what comes back and the same repair is planned on every run.
+    const planned = String(plan.changes[0].cells['Source']);
+    expect(planned.length).toBeLessThanOrEqual(3900);       // what a cell can actually hold
+  });
+});

@@ -10,7 +10,7 @@
  * Use:  `const plan = planSync(items, rows, state, now)`; `await applyPlan(plan, target, state, now)`.
  */
 import type { PlannedChange, ProjectItem, Status, SyncPlan, SyncStatus } from '../model/types.js';
-import { humanSeedCells, repoCells, reviewCells, sharedCells } from '../adapters/smartsheet/mapper.js';
+import { humanSeedCells, repoCells, reviewCells, sharedCells, trunc } from '../adapters/smartsheet/mapper.js';
 import type { SheetTarget, TargetRow, CellValues } from './target.js';
 import type { SyncState } from './state.js';
 import { log } from '../log/logger.js';
@@ -85,8 +85,23 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
   const changes: PlannedChange[] = [];
   const seen = new Set<string>();
 
+  // Two items must never both write one row. Identities are supposed to be unique, but a
+  // 48-bit digest can in principle collide, and when it does the second item silently wins
+  // while the first item's Owner and Management Notes stay attached to work that is not
+  // theirs. Neither item is written until a person separates them.
+  const itemsPerId = new Map<string, number>();
+  for (const it of items) itemsPerId.set(it.itemId, (itemsPerId.get(it.itemId) ?? 0) + 1);
+  const contestedIds = new Set([...itemsPerId].filter(([, n]) => n > 1).map(([id]) => id));
+  if (contestedIds.size) {
+    log.warn(`${contestedIds.size} Item ID(s) are claimed by more than one repository item: ${[...contestedIds].join(', ')}. Those items are left untouched - writing either one would attach it to the other's row. Please report this: it means two different items produced the same identity digest.`);
+  }
+
   for (const item of items) {
     seen.add(item.itemId);
+    if (contestedIds.has(item.itemId)) {
+      changes.push({ action: 'unchanged', item, cells: {}, reasons: [`skipped: another repository item produced the same Item ID ${item.itemId}, so neither can be written safely`] });
+      continue;
+    }
     if (duplicateIds.has(item.itemId)) {
       // Not a create either - that would add a third row with the same identity.
       changes.push({ action: 'unchanged', item, cells: {}, reasons: [`skipped: ${allRowsForId.get(item.itemId)?.length ?? 2} sheet rows claim Item ID ${item.itemId}, so no update can be applied safely. Delete the extra copies; if they are genuinely different items, this is a digest collision and should be reported.`] });
@@ -104,7 +119,9 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // nobody's, and trusting it was how the guard ended up disabled on exactly the sheets the
     // migration was meant to protect.
     const rowPath = String(row?.cells['Repo Path'] ?? '');
-    const rowIsOurs = String(row?.cells['Repo Fingerprint'] ?? '') !== '';
+    // "This tool wrote the row" has to mean the cell looks like something this tool writes, not
+    // merely that somebody typed in it. A presence check accepted a single character.
+    const rowIsOurs = /^[0-9a-f]{12}$/.test(String(row?.cells['Repo Fingerprint'] ?? ''));
     if (row && (rowPath === '' ? !rowIsOurs : rowPath !== item.repositoryPath)) {
       // The row carries this Item ID but points at a different file. Identity always includes
       // the path, so this cannot be the same item: the ID was hand-edited, or two identities
@@ -307,7 +324,11 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       // got destroyed two rounds ago - so repair exactly those two cells and nothing else.
       const backfill: CellValues = {};
       if (rowPath !== item.repositoryPath) backfill['Repo Path'] = item.repositoryPath;
-      if (String(row.cells['Source'] ?? '') !== item.sourceReference) backfill['Source'] = item.sourceReference;
+      // Compare and write the value a cell can actually hold. Comparing the raw one against a
+      // stored, truncated one never matched, so an overlong Source planned the same repair on
+      // every single run.
+      const storedSource = String(trunc(item.sourceReference) ?? '');
+      if (String(row.cells['Source'] ?? '') !== storedSource) backfill['Source'] = storedSource;
       if (Object.keys(backfill).length) {
         changes.push({
           action: 'update',
