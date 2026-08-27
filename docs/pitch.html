@@ -281,10 +281,10 @@
     <div class="kicker">
       <span class="tag">Engineering demo</span>
       <span class="tag">Repository &rarr; Smartsheet</span>
-      <span class="tag">61 tests green</span>
+      <span class="tag">74 tests green</span>
     </div>
     <h1>Your repo already wrote the status report. <span class="hl">It just never told the PM.</span></h1>
-    <p class="lede">A command-line tool that reads an existing codebase, turns the project information already hiding inside it into clean Smartsheet rows, and keeps them current, without inventing a single fact.</p>
+    <p class="lede">A command-line tool that reads an existing codebase, turns the project information already hiding inside it into clean Smartsheet rows, and keeps them current. It never invents an owner, a priority or a date.</p>
     <div class="flow">
       <b>Repository</b> <span class="ar">&rarr;</span> Scan <span class="ar">&rarr;</span> Extract <span class="ar">&rarr;</span> Normalize <span class="ar">&rarr;</span> Validate <span class="ar">&rarr;</span> Sync <span class="ar">&rarr;</span> <b>Smartsheet</b>
     </div>
@@ -315,7 +315,7 @@
     <div class="stats">
       <div class="stat"><div class="v">23</div><div class="l">items found in the demo repo</div></div>
       <div class="stat"><div class="v">9</div><div class="l">evidence extractors</div></div>
-      <div class="stat"><div class="v">61</div><div class="l">automated tests passing</div></div>
+      <div class="stat"><div class="v">74</div><div class="l">automated tests passing</div></div>
       <div class="stat"><div class="v">0</div><div class="l">rows deleted, ever</div></div>
     </div>
   </div>
@@ -330,7 +330,7 @@
       <p>Lots of important notes are hidden inside it: little reminders to fix things, a list of what is already finished, a diary of every change.</p>
       <p>Our program looks through the box and finds the useful notes. It does not throw anything away, and it does not move anything. It only <b>reads</b>.</p>
       <p>Then it writes neat copies of those notes onto a big checklist that the whole team can see. That checklist is <b>Smartsheet</b>.</p>
-      <p>When something in the toy box changes, the program checks again and updates the checklist on the <b>same line</b>, so you never end up with two copies of one note.</p>
+      <p>When something in the toy box changes, the program checks again and updates the checklist on the <b>same line</b> instead of adding another one. Run it twice at once and it can still double up, so it is meant to be run one at a time.</p>
       <p>And if the program is not sure about something, it does not guess. It puts a little <b>flag</b> on it and asks a grown-up to look.</p>
     </div>
   </div>
@@ -369,7 +369,7 @@
           <li><span class="mk">&times;</span><span><b>An owner</b> the code never named (7 of 23 rows left blank)</span></li>
           <li><span class="mk">&times;</span><span><b>Completion percentages</b> and made-up status</span></li>
           <li><span class="mk">&times;</span><span><b>Whether tests pass</b> &mdash; the tool never executes the target's code</span></li>
-          <li><span class="mk">&times;</span><span>Guesses go to an <b>AI Suggestion</b> column with a Human Review flag &mdash; never into a fact column</span></li>
+          <li><span class="mk">&times;</span><span>Guesses go to an <b>AI Suggestion</b> column with a Human Review flag &mdash; never into an owner, priority or date column</span></li>
         </ul>
       </div>
     </div>
@@ -380,7 +380,7 @@
   <div class="wrap">
     <p class="eyebrow">Real output</p>
     <h2 class="sec">Actual rows from the demo repository.</h2>
-    <p class="sub">This is genuine output from &ldquo;Orderly&rdquo;, a small bakery order-tracking API bundled with the tool. Note the blanks the tool chose to leave, the monospace <span class="mono">file:line</span> source on every row, and the low-confidence risk routed to Human Review.</p>
+    <p class="sub">This is genuine output from &ldquo;Orderly&rdquo;, a small bakery order-tracking API bundled with the tool. Note the blanks the tool chose to leave, the monospace <span class="mono">file:line</span> source on every row that has a line, and the low-confidence risk routed to Human Review.</p>
     <div class="sheet-wrap">
       <div class="sheet-bar"><span class="glyph"></span> Orderly &mdash; Repo Intelligence &nbsp;&middot;&nbsp; 23 rows &nbsp;&middot;&nbsp; 3 need review</div>
       <div class="scroll">
@@ -471,12 +471,12 @@
     <h2 class="sec">Not just rows in a grid. The whole toolset, wired up for you.</h2>
     <p class="sub">The rows are the start. What turns the sheet into something that runs a project is Smartsheet own features, set up so the sheet reacts, alerts, and summarizes on its own, with no one babysitting it.</p>
     <div class="feat-grid">
-      <div class="feat"><div class="lab">Column types</div><h4>Dropdowns and real contacts</h4><p>Type, Status, Priority and Confidence are proper single-select dropdowns, not free text. Owner is a Contact, so Smartsheet knows it is a real person it can notify.</p></div>
+      <div class="feat"><div class="lab">Column types</div><h4>Dropdowns and real contacts</h4><p>Type, Status, Priority and Confidence are proper single-select dropdowns, not free text. Owner is a Contact column, which is what lets Smartsheet offer it as an alert recipient at all. A Contact holds a real address only when the code stated one; a CODEOWNERS handle such as <span class="mono">@team-b</span> is written as a display value, and a display value cannot be emailed.</p></div>
       <div class="feat"><div class="lab">Conditional formatting</div><h4>The sheet colours itself</h4><p>Rows turn red when the code and a person disagree, amber when something is flagged for review, and grey when an item vanished from the code. Trouble is visible at a glance.</p></div>
       <div class="feat"><div class="lab">Saved filter</div><h4>&ldquo;Needs my attention&rdquo;</h4><p>One shared view that shows only the rows that are blocked, in conflict, or flagged for review. Everyone opens the same filter and sees exactly what is on fire.</p></div>
-      <div class="feat"><div class="lab">Automations</div><h4>Alerts that send themselves</h4><p>When a row is flagged for review, Smartsheet emails the Owner. A weekly reminder nudges anyone sitting on a blocked item. No one has to remember to chase.</p></div>
+      <div class="feat"><div class="lab">Automations</div><h4>Alerts that send themselves</h4><p>Two automations built on the live sheet: when a row is flagged for review Smartsheet emails the Owner, and a weekly reminder chases items with no owner at all. The tool creates the sheet and its columns; the automations are built once in Smartsheet's UI, and <span class="mono">docs/smartsheet-import.md</span> walks through it.</p></div>
       <div class="feat"><div class="lab">Forms and update requests</div><h4>Ask the team, safely</h4><p>Where the code never named an owner, Smartsheet sends an update request asking who owns this. The answer drops into the row, and the sync never overwrites it.</p></div>
-      <div class="feat"><div class="lab">Dashboard and reports</div><h4>Status without opening the sheet</h4><p>A live summary sheet of counts, built from cross-sheet formulas, feeds charts and a report so leadership sees where things stand without touching a single row.</p></div>
+      <div class="feat"><div class="lab">Dashboard and reports</div><h4>Status without opening the sheet</h4><p>A summary sheet of counts, built from sheet-summary formulas, feeds a dashboard and a report so leadership sees where things stand without touching a single row.</p></div>
     </div>
 
     <h3 class="dash-title">The one screen a manager opens first.</h3>
@@ -513,7 +513,7 @@
     <p class="sub">Nine small, independently tested extractors do the parsing &mdash; no language model in the path that produces facts. An optional Claude pass (off by default) writes plain-language summaries into the AI Suggestion column, and may fill an empty Description with a clearly labelled summary. It never writes to a fact column such as Owner, Status, Priority or Source.</p>
     <div class="pipe">
       <div class="stage"><div class="s-n">STAGE 01</div><h4>Scan</h4><p>Walk the repo read-only. Skip vendor dirs and binaries. Withhold anything that looks like a secret before any other rule.</p></div>
-      <div class="stage"><div class="s-n">STAGE 02</div><h4>Extract</h4><p>Nine parsers turn comments, checklists, changelogs, manifests, CI, tests, CODEOWNERS and ADRs into verbatim evidence.</p></div>
+      <div class="stage"><div class="s-n">STAGE 02</div><h4>Extract</h4><p>Nine parsers turn comments, checklists, changelogs, manifests, CI, tests, CODEOWNERS and ADRs into quoted evidence: whitespace collapsed, clipped to 400 characters, redacted.</p></div>
       <div class="stage"><div class="s-n">STAGE 03</div><h4>Normalize + validate</h4><p>Evidence becomes rows with a stable ID and a confidence level. A guard rejects any invented owner, priority or date.</p></div>
       <div class="stage"><div class="s-n">STAGE 04</div><h4>Sync</h4><p>A three-way merge creates, updates or flags rows in Smartsheet. Idempotent, batched, retry-aware. Or export a CSV.</p></div>
     </div>
@@ -607,7 +607,7 @@ Final sheet: 23 rows, 0 deleted.</div>
   <div class="wrap">
     <p class="eyebrow">Honest status</p>
     <h2 class="sec">Built and verified &mdash; and what is left.</h2>
-    <p class="sub">The tool is complete and tested. One thing is deliberately not claimed as done: the live write against a real Smartsheet account, which needs an API token this build did not have.</p>
+    <p class="sub">Every feature described above is built, and 74 automated tests cover the pipeline and the API client against a fake <span class="mono">fetch</span>. One thing is deliberately not claimed as done: no test or run has ever written to a real Smartsheet account over the API, because that requires a Business-plan token this build did not have. The sheet, dashboard and automations shown here were built in the Smartsheet UI from the tool's own CSV export.</p>
     <div class="cols2">
       <div class="list done">
         <h3><span class="dot" style="width:9px;height:9px;border-radius:50%;background:var(--good);display:inline-block"></span>Done and verified</h3>
@@ -618,15 +618,15 @@ Final sheet: 23 rows, 0 deleted.</div>
           <li>CSV fallback for teams without API access</li>
           <li>Dry-run mode that writes nothing</li>
           <li>Secret filtering and read-only guarantee</li>
-          <li>61 automated tests passing; typecheck clean</li>
+          <li>74 automated tests passing; typecheck clean</li>
           <li>ELI5 guide, technical docs, data mapping, demo script</li>
         </ul>
       </div>
       <div class="list next">
         <h3><span class="dot" style="width:9px;height:9px;border-radius:50%;background:var(--accent);display:inline-block"></span>Next, with your account</h3>
         <ul>
-          <li><b>Connect a real Smartsheet from the browser demo</b> - paste a token, create a sheet, and write real rows (or use the CLI <span class="mono">setup-sheet</span> then <span class="mono">sync --dry-run</span>)</li>
-          <li>A serverless proxy holds the token server-side (never in the browser); the live path is deployed and one token away</li>
+          <li><b>Connect a real Smartsheet from the browser demo</b> - paste a token into the Connect panel and it is sent straight to a serverless function, never stored and never used from page JavaScript (or skip the browser entirely and use the CLI: <span class="mono">setup-sheet</span> then <span class="mono">sync --dry-run</span>). A Business plan or higher is required; Free and trial accounts cannot issue an API token at all.</li>
+          <li>The live path is deployed and one Business-plan token away</li>
           <li>Point it at one of your real repositories</li>
           <li>Optional: turn on the Claude summary pass</li>
           <li>Future: scheduled or webhook-triggered incremental sync</li>
@@ -638,7 +638,7 @@ Final sheet: 23 rows, 0 deleted.</div>
       <p style="margin:0 0 16px"><a class="cta-demo" href="/demo/" style="font-size:15px;padding:11px 18px">Or open the interactive demo &rarr;</a></p>
       <pre><span class="cm"># from the app/ folder</span>
 npm install
-npm test                 <span class="cm"># 61 passing</span>
+npm test                 <span class="cm"># 74 passing</span>
 npx rsi <span class="ac">demo</span>            <span class="cm"># the full storyline, no account needed</span>
 
 <span class="cm"># when you have a Smartsheet token in .env:</span>
@@ -652,7 +652,7 @@ npx rsi <span class="ac">sync</span></pre>
 <footer>
   <div class="wrap fl">
     <span>Repo &rarr; Smartsheet Project Intelligence</span>
-    <span>TypeScript &middot; Node &middot; 61 tests &middot; built for the Smartsheet workflow</span>
+    <span>TypeScript &middot; Node &middot; 74 tests &middot; built for the Smartsheet workflow</span>
   </div>
 </footer>
 

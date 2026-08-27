@@ -18,7 +18,12 @@ import { buildScan, type RawEntry } from './inventory.js';
 import type { RepoInventory, ScannedFile } from '../model/types.js';
 import { log } from '../log/logger.js';
 
-export interface ScanOptions { ignore: string[]; maxFileSizeKb: number }
+/**
+ * `include` is a positive glob filter applied to FILES only, after the ignore list. It is not
+ * used to prune directories during the walk: a pattern like `src/**\/*.ts` does not match the
+ * directory `src`, so pruning on it would skip the very tree it selects.
+ */
+export interface ScanOptions { include?: string[]; ignore: string[]; maxFileSizeKb: number }
 
 export function scanRepository(root: string, opts: ScanOptions): { files: ScannedFile[]; inventory: RepoInventory } {
   const isIgnored = compileIgnore(opts.ignore);
@@ -49,7 +54,7 @@ export function scanRepository(root: string, opts: ScanOptions): { files: Scanne
   };
   walk(root);
 
-  const { files, inventory } = buildScan(entries, { ignore: opts.ignore, maxFileSizeKb: opts.maxFileSizeKb, root, hasGit: !!git, headCommit: git?.head });
+  const { files, inventory } = buildScan(entries, { include: opts.include, ignore: opts.ignore, maxFileSizeKb: opts.maxFileSizeKb, root, hasGit: !!git, headCommit: git?.head });
   log.info(`Analyzed ${files.length} repository files (${inventory.filesIgnored} ignored by rules, ${inventory.filesSkippedSensitive.length} skipped as sensitive).`);
   if (!git) log.info('No git history found; Source Commit and Last Repo Update will stay blank.');
   return { files, inventory };

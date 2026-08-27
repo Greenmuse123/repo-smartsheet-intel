@@ -15,6 +15,7 @@ export { ALL_EXTRACTORS, DEFAULT_IGNORE };
 export interface ProjectConfig {
   project: { name: string; repository: string };
   scan: {
+    /** Positive glob filter applied after the ignore list. `['**\/*']` keeps everything. */
     include: string[];
     ignore: string[];
     maxFileSizeKb: number;
@@ -27,11 +28,12 @@ export interface ProjectConfig {
     tokenEnv: string;
     batchSize: number;
   };
-  sync: {
-    stateDir: string;
-    humanControlled: string[];
-    shared: string[];
-  };
+  /**
+   * Which columns are human-controlled versus shared is NOT configurable: those roles are
+   * part of the sheet schema and the merge rules are written against them. Only the state
+   * directory is a choice.
+   */
+  sync: { stateDir: string };
   ai: { enabled: boolean; model: string; maxExcerptChars: number };
   output: { dir: string };
 }
@@ -42,11 +44,7 @@ export function defaultConfig(overrides: Partial<ProjectConfig> = {}): ProjectCo
     scan: { include: ['**/*'], ignore: [...DEFAULT_IGNORE], maxFileSizeKb: 512, perPackageDependencies: false },
     track: ['everything'],
     smartsheet: { sheetName: 'My Project - Repo Intelligence', sheetIdEnv: 'SMARTSHEET_SHEET_ID', tokenEnv: 'SMARTSHEET_ACCESS_TOKEN', batchSize: 400 },
-    sync: {
-      stateDir: '.repo-smartsheet',
-      humanControlled: ['Priority', 'Owner', 'Dependency', 'Milestone', 'Due Date', 'Management Notes'],
-      shared: ['Status', 'Human Review'],
-    },
+    sync: { stateDir: '.repo-smartsheet' },
     ai: { enabled: false, model: 'claude-opus-5', maxExcerptChars: 400 },
     output: { dir: 'output' },
   };

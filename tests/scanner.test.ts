@@ -72,3 +72,34 @@ describe('CRLF handling', () => {
     expect(files[0].content).toContain('// TODO(sam): fix this');
   });
 });
+
+describe('scan.include is a real filter, not decoration (round-3 review m-13)', () => {
+  const repo = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rsi-include-'));
+    mkdirSync(join(dir, 'src'), { recursive: true });
+    mkdirSync(join(dir, 'vendor'), { recursive: true });
+    writeFileSync(join(dir, 'src', 'a.ts'), '// TODO: keep me\n');
+    writeFileSync(join(dir, 'vendor', 'b.ts'), '// TODO: drop me\n');
+    writeFileSync(join(dir, 'README.md'), '# hi\n');
+    return dir;
+  };
+  const paths = (r: { files: Array<{ path: string }> }) => r.files.map((f) => f.path).sort();
+
+  it('narrows the scan to the matching files', () => {
+    const dir = repo();
+    expect(paths(scanRepository(dir, { include: ['src/**'], ignore: [], maxFileSizeKb: 512 }))).toEqual(['src/a.ts']);
+  });
+
+  it('treats an absent or empty include list as "no positive filter", never as "match nothing"', () => {
+    const dir = repo();
+    const all = paths(scanRepository(dir, { ignore: [], maxFileSizeKb: 512 }));
+    expect(all).toContain('src/a.ts');
+    expect(all).toContain('vendor/b.ts');
+    expect(paths(scanRepository(dir, { include: [], ignore: [], maxFileSizeKb: 512 }))).toEqual(all);
+  });
+
+  it('still lets the ignore list win over an include match', () => {
+    const dir = repo();
+    expect(paths(scanRepository(dir, { include: ['**/*.ts'], ignore: ['vendor/'], maxFileSizeKb: 512 }))).toEqual(['src/a.ts']);
+  });
+});

@@ -45,8 +45,14 @@ export class SmartsheetClient {
   private writeChain: Promise<unknown> = Promise.resolve();
   public requestCount = 0;
 
+  private readonly token: string;
+
   constructor(private readonly opts: ClientOptions) {
-    if (!opts.token || !opts.token.trim()) {
+    // Trim at the boundary. A token pasted with a trailing newline is a real and common
+    // mistake; validating the trimmed value but sending the raw one produced a confusing
+    // 401 for a token that was actually correct.
+    this.token = (opts.token ?? '').trim();
+    if (!this.token) {
       throw new SmartsheetError('No Smartsheet access token was provided.', 0, undefined,
         'Set SMARTSHEET_ACCESS_TOKEN in your environment (or .env). Never put it in project-config.yaml.');
     }
@@ -103,7 +109,7 @@ export class SmartsheetClient {
       try {
         res = await this.fetchImpl(this.base + path, {
           method,
-          headers: { Authorization: `Bearer ${this.opts.token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+          headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
           body: body === undefined ? undefined : JSON.stringify(body),
         });
       } catch (e) {
@@ -132,8 +138,14 @@ export class SmartsheetClient {
 }
 
 function toFriendly(status: number, code: number | undefined, message?: string): SmartsheetError {
-  if (status === 401 || code === 1002 || code === 1003 || code === 1004) {
+  if (status === 401 || code === 1002 || code === 1003) {
     return new SmartsheetError('Smartsheet rejected the access token.', status, code, 'Check SMARTSHEET_ACCESS_TOKEN: it may be missing, expired, or pasted with extra spaces. Generate a new token under Account > Apps & Integrations > API Access.');
+  }
+  // 1004 is "not authorized to perform this action" - the token is valid, the operation is
+  // not permitted. Reporting it as a bad token sends people to regenerate a working token.
+  if (code === 1004) {
+    return new SmartsheetError('The token is valid but is not authorized for this action.', status, code,
+      'Check that the token owner has Editor (not Viewer) access to the sheet, and that your plan allows this operation.');
   }
   if (status === 403) {
     // 1013 is a plan/licence restriction, not a sheet-sharing problem, and it is what a

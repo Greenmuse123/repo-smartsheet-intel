@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { SmartsheetClient, SmartsheetError, chunk } from '../src/adapters/smartsheet/client.js';
 import { sheetCreateBody, COLUMNS } from '../src/adapters/smartsheet/schema.js';
+import { SmartsheetTarget } from '../src/adapters/smartsheet/target.js';
 
 type Resp = { status: number; body?: unknown; headers?: Record<string, string> };
 function fakeFetch(script: Resp[]) {
@@ -105,5 +106,54 @@ describe('hardening found by adversarial review', () => {
     const { fetchImpl } = fakeFetch([{ status: 200, body: { result: { unexpected: true } } }]);
     const c = new SmartsheetClient({ token: 't', fetchImpl, sleep: noSleep });
     await expect(c.updateRows(1, [{ id: 1, cells: [] }])).rejects.toMatchObject({ name: 'SmartsheetError', message: /unrecognised response/ });
+  });
+});
+
+describe('the real Smartsheet target, not just the in-memory one (round-3 review regressions)', () => {
+  const sheetOf = (titles: string[]) => ({
+    id: 1, name: 's', rows: [],
+    columns: titles.map((title, i) => ({ id: 100 + i, title, type: 'TEXT' })),
+  });
+  const clientReturning = (sheet: unknown) => {
+    const { fetchImpl } = fakeFetch([{ status: 200, body: sheet }]);
+    return new SmartsheetClient({ token: 't', fetchImpl, sleep: noSleep });
+  };
+  const ALL = COLUMNS.map((c) => c.title);
+
+  it('accepts a sheet that has the full schema', async () => {
+    const t = new SmartsheetTarget(clientReturning(sheetOf(ALL)), '1');
+    await expect(t.readRows()).resolves.toEqual([]);
+  });
+
+  it('refuses to sync a sheet missing Repo Status, the three-way merge baseline (R2-04)', async () => {
+    // Repo Status is the sheet-side record of what WE last wrote. Without it the planner
+    // cannot distinguish a human edit from a repository change on a fresh clone, so it must
+    // fail loudly rather than mislabel one as the other.
+    const t = new SmartsheetTarget(clientReturning(sheetOf(ALL.filter((x) => x !== 'Repo Status'))), '1');
+    await expect(t.readRows()).rejects.toMatchObject({ name: 'SmartsheetError', message: /Repo Status/ });
+  });
+
+  it('refuses to sync a sheet missing Item ID, which would re-create every row (R2-04)', async () => {
+    const t = new SmartsheetTarget(clientReturning(sheetOf(ALL.filter((x) => x !== 'Item ID'))), '1');
+    await expect(t.readRows()).rejects.toMatchObject({ name: 'SmartsheetError', message: /Item ID/ });
+  });
+});
+
+describe('error messages point at the real cause (round-3 review regressions)', () => {
+  it('reports errorCode 1004 as an authorization problem, not a bad token (M-06)', async () => {
+    // 1004 is "not authorized to perform this action". Calling it a rejected token sends
+    // people off to regenerate a token that was working fine.
+    const { fetchImpl } = fakeFetch([{ status: 403, body: { errorCode: 1004, message: 'Not authorized.' } }]);
+    const c = new SmartsheetClient({ token: 't', fetchImpl, sleep: noSleep });
+    await expect(c.getSheet(1)).rejects.toMatchObject({ errorCode: 1004, message: /not authorized for this action/ });
+  });
+
+  it('trims a token pasted with surrounding whitespace instead of sending it malformed (R2-06)', async () => {
+    // The constructor validated token.trim() but sent the raw value, so a token with a
+    // trailing newline passed local validation and then came back 401.
+    const { fetchImpl, calls } = fakeFetch([{ status: 200, body: { id: 1, name: 's', columns: [], rows: [] } }]);
+    const c = new SmartsheetClient({ token: '  abc123\n', fetchImpl, sleep: noSleep });
+    await c.getSheet(1);
+    expect(calls).toHaveLength(1);
   });
 });

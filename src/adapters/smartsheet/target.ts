@@ -10,8 +10,13 @@ import { log } from '../../log/logger.js';
 /** Columns Smartsheet parses as contacts. Handles like `@team-b` are not valid emails. */
 const CONTACT_COLUMNS = new Set(COLUMNS.filter((c) => c.type === 'CONTACT_LIST').map((c) => c.title));
 
-/** Without these the sheet has no stable identity and every run would re-create every row. */
-const REQUIRED_COLUMNS = ['Item ID', 'Repo Fingerprint', 'Sync Status'];
+/**
+ * Without these the sheet has no stable identity and every run would re-create every row.
+ * `Repo Status` is here too: it is the sheet-side record of the value WE last wrote, which is
+ * the baseline of the three-way merge. Without it a fresh clone cannot tell a human edit from
+ * a repository change, and would mislabel one as the other.
+ */
+const REQUIRED_COLUMNS = ['Item ID', 'Repo Fingerprint', 'Sync Status', 'Repo Status'];
 
 export class SmartsheetTarget implements SheetTarget {
   readonly sheetId: string;

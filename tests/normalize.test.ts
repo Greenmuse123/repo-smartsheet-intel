@@ -129,8 +129,34 @@ describe('redaction must not destroy identity (round-2 review regression)', () =
     // ...while still never publishing the secret
     expect(JSON.stringify(out)).not.toContain('abcdefgh');
     expect(JSON.stringify(out)).not.toContain('ijklmnop');
-    // ...and preserving the structure a human needs to find the file
-    expect(out[0].repositoryPath).toBe('src/token=[REDACTED]/a.ts');
-    expect(out[1].repositoryPath).toBe('src/token=[REDACTED]/b.ts');
+    // ...and preserving the structure a human needs to find the file. The redacted marker
+    // carries the row's own Item ID suffix so two rows can never look identical (R3-03).
+    expect(out[0].repositoryPath).toMatch(/^src\/token=\[REDACTED-[0-9a-f]{8}\]\/a\.ts$/);
+    expect(out[1].repositoryPath).toMatch(/^src\/token=\[REDACTED-[0-9a-f]{8}\]\/b\.ts$/);
+  });
+
+  it('keeps two rows distinguishable when redaction maps both paths to one string (R3-03)', () => {
+    // Regression: with the SAME filename, segment redaction produced one published path for
+    // two different files. Item ID differed, but repositoryPath, Source and the fingerprint
+    // were all identical, so a reviewer could not tell which row was which file.
+    const a = todo({ path: 'src/token=abcdefgh/a.ts' });
+    const b = todo({ path: 'src/token=ijklmnop/a.ts' });
+    const out = normalize([a, b]);
+    expect(out).toHaveLength(2);
+    expect(out[0].repositoryPath).not.toBe(out[1].repositoryPath);
+    expect(out[0].sourceReference).not.toBe(out[1].sourceReference);
+    expect(out[0].fingerprint).not.toBe(out[1].fingerprint);
+    // The discriminator is the row's own Item ID suffix - already published, so it leaks
+    // nothing that the Item ID column does not already show.
+    expect(out[0].repositoryPath).toContain(out[0].itemId.slice(-8));
+    expect(JSON.stringify(out)).not.toContain('abcdefgh');
+    expect(JSON.stringify(out)).not.toContain('ijklmnop');
+  });
+
+  it('leaves an unredacted path completely untouched', () => {
+    // The discriminator must appear ONLY where redaction actually removed something.
+    const out = normalize([todo({ path: 'src/checkout/cart.ts' })]);
+    expect(out[0].repositoryPath).toBe('src/checkout/cart.ts');
+    expect(out[0].repositoryPath).not.toContain('REDACTED');
   });
 });

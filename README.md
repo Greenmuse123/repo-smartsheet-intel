@@ -13,7 +13,7 @@ Repository → Scanner → Extractors → Normalized Project Model → Validatio
 
 - Works with **or without** Smartsheet API access (CSV fallback).
 - `sync --dry-run` shows every change before anything is written.
-- 61 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, invalid credentials, plan-restriction errors, rate-limit retries, and dry-run safety.
+- 74 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, the required-column guard on the real Smartsheet target, invalid credentials, authorization vs. token errors, plan-restriction errors, rate-limit retries, and dry-run safety. They run against a fake `fetch`; no test performs a live API call.
 
 ---
 
@@ -91,7 +91,7 @@ ERROR: Smartsheet rejected the access token.
 What to do: Check SMARTSHEET_ACCESS_TOKEN: it may be missing, expired, or pasted with extra spaces.
 ```
 
-If Smartsheet is busy, the program waits and retries by itself. If a run fails halfway, run it again: it will pick up where it left off without making duplicates. If you are ever unsure, run `sync --dry-run` first; it changes nothing.
+If Smartsheet is busy, the program waits and retries by itself. If a run fails halfway, run it again: rows that were already written are matched by their `Item ID` and updated rather than added, so re-running is safe. (Batches commit independently, so an earlier batch can succeed while a later one fails; that is exactly the case re-running is designed to recover from.) If you are ever unsure, run `sync --dry-run` first; it changes nothing.
 
 ---
 
@@ -102,7 +102,7 @@ If Smartsheet is busy, the program waits and retries by itself. If a run fails h
 ```
 Repository (read-only)
     ↓ scanner/        walk tree · ignore rules · sensitive-file gate · git metadata (one `git log`) · classification
-    ↓ extractors/     nine pure functions over the file list → RawEvidence[] (verbatim excerpts, ≤400 chars, redacted)
+    ↓ extractors/     nine pure functions over the file list → RawEvidence[] (quoted excerpts, whitespace collapsed, ≤400 chars, redacted)
     ↓ model/          normalize → ProjectItem (stable Item ID, Type, Status, Confidence, Human Review, fingerprint)
     ↓ model/validate  no-fabrication guard: owner/priority/dates must cite evidence; enums; every item has evidence
     ↓ ai/             OPTIONAL Claude pass (off by default): summaries + risk notes → AI Suggestion only
@@ -167,8 +167,8 @@ smartsheet:
   batchSize: 400
 sync:
   stateDir: .repo-smartsheet
-  humanControlled: [Priority, Owner, Dependency, Milestone, Due Date, Management Notes]
-  shared: [Status, Human Review]
+# Which columns are human-controlled and which are shared is NOT configurable: those roles are
+# part of the sheet schema and the merge rules are written against them.
 ai:
   enabled: false
   model: claude-opus-5
@@ -275,15 +275,15 @@ All commands accept `-c <config>` and `-v`.
 
 ## Level 1 - to a 5-year-old
 
-The computer reads the sticky notes inside the toy box, copies them neatly onto a big chart, and asks a grown-up whenever it is not sure. It never throws a note away and never makes one up.
+The computer reads the sticky notes inside the toy box, copies them neatly onto a big chart, and asks a grown-up whenever it is not sure. It never throws a note away, and it never invents a name or a date. (It does say an unfinished note is "Not Started" - that is the one thing it decides for itself, and it is a rule, not a guess.)
 
 ## Level 2 - to a project manager
 
 - **Time saved:** no more hunting through READMEs, changelogs and code comments; one command produces the sheet and keeps it current.
 - **Visibility:** every open TODO, bug, release, decision and test suite in one filterable view with Type, Status, Component and Owner (when the code states it).
-- **Easier updates:** re-running updates the same rows; nothing duplicates, nothing is deleted.
+- **Easier updates:** re-running matches rows by `Item ID` and updates them in place; nothing is ever deleted. Duplicate protection is per sync run: two syncs running against the same sheet at the same time can both decide to create the same row, so run one at a time (see the concurrency note above).
 - **Fewer mistakes:** blank beats guessed. Priority, due dates and owners are yours; the tool only seeds them when the code literally says so.
-- **Traceability:** every row has a Source (`file:line`) and a Confidence, so you can verify in seconds.
+- **Traceability:** every row has a Source and a Confidence, so you can verify in seconds. The Source is `file:line` wherever the evidence has a line; repository-wide checks (a missing CI config, say) cite `(repository)` instead.
 - **Human review:** suggestions, conflicts and vanished items are flagged for a person, never silently decided.
 
 ## Level 3 - to an engineer
@@ -291,10 +291,10 @@ The computer reads the sticky notes inside the toy box, copies them neatly onto 
 - **Architecture:** scanner → pure extractors → normalizer → validator → optional LLM → pure planner → batched adapter. Each unit is independently testable; extractors operate on an in-memory file list.
 - **Parsing:** regex/line parsers for comments, markdown sections, Keep-a-Changelog headings, JSON/TOML/requirements manifests, YAML job names, CODEOWNERS (last match wins). No LLM in the parse path.
 - **LLM usage:** optional Anthropic call with redacted ≤400-char excerpts, `effort: low`, batch of 25, JSON out; writes only `AI Suggestion` (and empty descriptions, labeled). Disabled → byte-identical output.
-- **Data model:** `RawEvidence` kept verbatim inside `ProjectItem`; stable IDs from `sha1(path|normalized text)`; fingerprint over repo-controlled fields minus the line number.
+- **Data model:** `RawEvidence` kept inside `ProjectItem` as the closest safely-publishable quotation (whitespace collapsed, clipped to 400 chars, every free-text field redacted); stable IDs from `sha1(path|normalized text)`; fingerprint over repo-controlled fields minus the line number.
 - **Synchronization:** read sheet once → 3-way merge on shared fields (last-written value is persisted in the sheet as `Repo Status`) → create/update/conflict/missing → batched `POST`/`PUT` ≤400 rows, serialized per sheet.
 - **API interaction:** thin `fetch` client; 429/5xx/network retried with exponential backoff and `Retry-After`; friendly errors for 401/403/404.
-- **State management:** local `state.json` is a cache; `Item ID` + `Repo Fingerprint` + `Repo Status` in the sheet are sufficient to rebuild it (tested).
+- **State management:** local `state.json` is a cache; `Item ID` + `Repo Fingerprint` + `Repo Status` in the sheet are sufficient to rebuild it (tested). Those three plus `Sync Status` are enforced as required columns: `SmartsheetTarget` refuses to sync a sheet missing any of them rather than silently mislabelling edits.
 - **Security:** sensitive-path gate before ignore rules, regex redaction at the excerpt boundary, env-only credentials, no repo writes.
 - **Conflict handling:** human-controlled columns written on create only; shared columns merged; conflicts keep the human value and flag.
 - **Testing:** 61 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.

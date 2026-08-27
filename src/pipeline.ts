@@ -19,7 +19,7 @@ export interface AnalysisResult { inventory: RepoInventory; items: ProjectItem[]
 
 export async function analyze(cfg: ProjectConfig & { configDir: string }, env: NodeJS.ProcessEnv = process.env): Promise<AnalysisResult> {
   const root = resolve(cfg.configDir, cfg.project.repository);
-  const { files, inventory } = scanRepository(root, { ignore: cfg.scan.ignore, maxFileSizeKb: cfg.scan.maxFileSizeKb });
+  const { files, inventory } = scanRepository(root, { include: cfg.scan.include, ignore: cfg.scan.ignore, maxFileSizeKb: cfg.scan.maxFileSizeKb });
   const evidence = runExtractors({ files, inventory, perPackageDependencies: cfg.scan.perPackageDependencies }, activeExtractors(cfg));
   const ownerRules = files.filter((f) => classify(f.path).isCodeowners).flatMap(parseCodeowners);
   let items = normalize(evidence, { ownerRules });

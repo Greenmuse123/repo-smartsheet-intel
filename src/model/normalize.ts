@@ -39,6 +39,11 @@ function componentOf(path: string): string {
   return path.includes('.') ? '(root)' : path; // a bare directory name (e.g. the "tests" suite root) is its own component
 }
 
+function tagRedactions(path: string, itemId: string): string {
+  const suffix = itemId.slice(-8);
+  return path.replace(/\[REDACTED\]/g, `[REDACTED-${suffix}]`);
+}
+
 export function normalize(evidence: RawEvidence[], opts: NormalizeOptions = {}): ProjectItem[] {
   const items: ProjectItem[] = [];
   const seen = new Set<string>();
@@ -60,15 +65,24 @@ export function normalize(evidence: RawEvidence[], opts: NormalizeOptions = {}):
     // Identity is hashed from the ORIGINAL path. Redaction is lossy - two different files
     // whose paths differ only inside a secret redact to the same string - so using the
     // redacted path here would collide and `seen` would silently discard real evidence.
-    // The hash is one-way, so nothing sensitive is recoverable from the id.
+    // The hash is one-way. It is NOT a privacy guarantee on its own: it is an unsalted,
+    // truncated digest, so someone who can guess a candidate path can confirm the guess
+    // offline. It hides an unguessable value; it does not hide a guessable one.
     const itemId = itemIdFor({ ...ev, path: raw.path });
     if (seen.has(itemId)) continue; // identical evidence twice (e.g. duplicated TODO text in one file)
     seen.add(itemId);
-    const sourceReference = `${ev.path}${ev.line ? `:${ev.line}` : ''} - ${ev.sourceType}${ev.refs?.length ? ` (refs ${ev.refs.join(', ')})` : ''}`;
+    // Redaction is lossy in the other direction too: `src/token=aaa/a.ts` and
+    // `src/token=bbb/a.ts` both publish as `src/token=[REDACTED]/a.ts`, so the two rows would
+    // be indistinguishable on the sheet - same path, same Source, same fingerprint. Tag the
+    // redacted marker with this row's own Item ID suffix. That suffix is ALREADY published in
+    // the Item ID column, so this discloses nothing new, and it makes the rows tellable apart
+    // (and their fingerprints distinct, since the path feeds the fingerprint).
+    const shownPath = ev.path === raw.path ? ev.path : tagRedactions(ev.path, itemId);
+    const sourceReference = `${shownPath}${ev.line ? `:${ev.line}` : ''} - ${ev.sourceType}${ev.refs?.length ? ` (refs ${ev.refs.join(', ')})` : ''}`;
     const partial: Omit<ProjectItem, 'fingerprint'> = {
       itemId,
       component: redact(componentOf(raw.path)).text,
-      repositoryPath: ev.path,
+      repositoryPath: shownPath,
       sourceReference,
       sourceCommit: ev.commit,
       lastRepositoryUpdate: ev.lastRepoUpdate,

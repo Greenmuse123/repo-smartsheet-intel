@@ -94,38 +94,54 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     }
 
     const reasons: string[] = ['repo-controlled fields changed'];
-    let syncStatus: SyncStatus = 'Updated';
-    let status: Status = item.status;
-    let humanReview = item.humanReviewRequired || Boolean(row.cells['Human Review']);
-    let action: PlannedChange['action'] = 'update';
+    if (wasMissing) reasons.push('item reappeared in the repository');
 
-    if (repoChangedStatus && humanChangedStatus && sheetStatus !== item.status) {
-      // Both sides moved Status and disagree → keep the human's value, surface ours in Repo Status.
+    // A conflict is a live disagreement between the two Status values - nothing else.
+    //
+    // Earlier versions inferred it from the `Sync Status` LABEL, which is unreliable: when a
+    // conflicted row is flagged "Missing in Repo" the Conflict marker is overwritten, so a
+    // conflicted item that vanished and came back changed looked like an ordinary update
+    // while the human and the repository still disagreed. Deriving the state from the values
+    // themselves makes every combination of (repoChanged, wasMissing, alreadyConflict)
+    // behave the same way, and makes resolution detectable on every path.
+    let action: PlannedChange['action'];
+    let syncStatus: SyncStatus;
+    let status: Status;
+    let humanReview: boolean;
+
+    // A NEW conflict is a true 3-way disagreement: both sides moved away from the last
+    // synced value and landed somewhere different. "Human ahead of a stable repository"
+    // (a person marks an open TODO In Progress) is normal and must NOT be a conflict, or
+    // almost every in-progress row would be flagged.
+    const bothMoved = repoChangedStatus && humanChangedStatus && statusesDisagree;
+    // An EXISTING conflict persists until a human makes the sheet agree. `alreadyConflict`
+    // alone is not enough: the missing pass overwrites Sync Status, so a conflicted row that
+    // vanished and returned would silently lose its marker. `wasMissing` carries it across.
+    const carriedConflict = statusesDisagree && (alreadyConflict || wasMissing);
+
+    if (bothMoved || carriedConflict) {
+      // The human's value always wins and ours is surfaced in Repo Status.
       action = 'conflict';
       syncStatus = 'Conflict';
       status = sheetStatus as Status;
       humanReview = true;
-      reasons.push(`status conflict: sheet says "${sheetStatus}", repo says "${item.status}", last synced "${lastWrittenStatus}"`);
-    } else if (humanChangedStatus) {
-      status = sheetStatus as Status; // human edited, repo didn't move → respect the human
-      reasons.push(`kept human status "${sheetStatus}"`);
-    } else if (repoChangedStatus) {
-      reasons.push(`status ${lastWrittenStatus || '(none)'} → ${item.status}`);
-    }
-    if (alreadyConflict && action !== 'conflict') {
-      // A conflict is resolved by a HUMAN making the sheet agree, never by an unrelated
-      // repository edit. Clearing it while the two sides still disagree silently discards
-      // the disagreement the row exists to surface.
-      const stillDisagrees = sheetStatus !== '' && sheetStatus !== item.status;
-      if (stillDisagrees) {
-        action = 'conflict';
-        syncStatus = 'Conflict';
-        status = sheetStatus as Status;
-        humanReview = true;
-        reasons.push(`conflict still unresolved: sheet says "${sheetStatus}", repo says "${item.status}"`);
-      } else {
-        reasons.push('previous conflict resolved: sheet and repo now agree');
-      }
+      reasons.push(
+        carriedConflict && !bothMoved
+          ? `conflict still unresolved: sheet says "${sheetStatus}", repo says "${item.status}"`
+          : `status conflict: sheet says "${sheetStatus}", repo says "${item.status}", last synced "${lastWrittenStatus || '(none)'}"`,
+      );
+    } else {
+      action = 'update';
+      syncStatus = 'Updated';
+      // A human who moved Status while the repository stayed put is ahead, not wrong.
+      status = humanChangedStatus && sheetStatus !== '' ? (sheetStatus as Status) : item.status;
+      // Reset Human Review to the item's own requirement. Carrying the old checkbox forward
+      // would leave a resolved row flagged for review forever, because the resolution branch
+      // only runs while the row is still labelled Conflict.
+      humanReview = item.humanReviewRequired;
+      if (alreadyConflict) reasons.push('conflict resolved: the sheet now agrees with the repository');
+      else if (humanChangedStatus) reasons.push(`kept human status "${sheetStatus}"`);
+      else if (repoChangedStatus) reasons.push(`status ${lastWrittenStatus || '(none)'} → ${item.status}`);
     }
 
     changes.push({ action, item, rowId: row.rowId, cells: { ...repoCells(item, syncStatus, now), ...sharedCells(status, humanReview) }, reasons });
@@ -183,7 +199,6 @@ function remember(state: SyncState, c: PlannedChange, rowId: number, now: string
     rowId,
     fingerprint: c.item.fingerprint,
     lastWrittenStatus: String((c.cells as CellValues)['Repo Status'] ?? c.item.status),
-    lastWrittenHumanReview: Boolean(c.cells['Human Review']),
     lastSyncedAt: now,
   };
 }

@@ -25,7 +25,13 @@ export type Confidence = (typeof CONFIDENCES)[number];
 export const SYNC_STATUSES = ['New', 'Synced', 'Updated', 'Conflict', 'Missing in Repo', 'Error'] as const;
 export type SyncStatus = (typeof SYNC_STATUSES)[number];
 
-/** A verbatim observation from the repository. Immutable after extraction. */
+/**
+ * One observation from the repository. Immutable after extraction.
+ *
+ * Not a byte-for-byte copy: excerpts have their whitespace collapsed and are clipped to 400
+ * characters at extraction, and normalization publishes a redacted copy. It is the closest
+ * quotation of the source the tool can safely put on a sheet.
+ */
 export interface RawEvidence {
   extractor: string;
   sourceType: string;

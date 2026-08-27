@@ -210,3 +210,69 @@ describe('dry run', () => {
     expect(state.items).toEqual({});
   });
 });
+
+describe('conflict state survives every path (round-3 review regressions)', () => {
+  const check = (state: 'x' | ' ', section = 'Roadmap') => ({
+    extractor: 'readme-checklist',
+    sourceType: state === 'x' ? 'Markdown checklist (checked)' : 'Markdown checklist (unchecked)',
+    path: 'README.md', line: 5, section, excerpt: 'ship it',
+  } as RawEvidence);
+  const T4 = '2026-08-24T13:00:00Z', T5 = '2026-08-24T14:00:00Z';
+
+  it('a conflict that vanishes and returns WITH a repo change is still a conflict (R3-01)', async () => {
+    // The missing pass overwrites Sync Status, so the "Conflict" label is gone by the time
+    // the item comes back. If the return also carries a fingerprint change, the row took the
+    // update path and was relabelled "Updated" while the two Status values still disagreed.
+    const other = ev('src/other.js', 'keep me');
+    await run(normalize([check(' '), other]), T1);
+    const checkId = normalize([check(' ')])[0].itemId;
+    const row = target.rows.find((r) => r.cells['Item ID'] === checkId)!;
+    row.cells['Status'] = 'Blocked';
+    await run(normalize([check('x'), other]), T2);
+    expect(row.cells['Sync Status']).toBe('Conflict');
+
+    await run(normalize([other]), T3);                        // vanishes; marker overwritten
+    expect(row.cells['Sync Status']).toBe('Missing in Repo');
+
+    // Returns AND the fingerprint moved (section changed) -> the update path.
+    const p = await run(normalize([check('x', 'Known issues'), other]), T4);
+    expect(target.rows).toHaveLength(2);                      // same row, not a new one
+    expect(row.cells['Status']).toBe('Blocked');              // human value still wins
+    expect(row.cells['Repo Status']).toBe('Done');            // repo value still surfaced
+    expect(row.cells['Sync Status']).toBe('Conflict');        // and it is NOT "Updated"
+    expect(row.cells['Human Review']).toBe(true);
+    expect(p.counts.conflict).toBe(1);
+  });
+
+  it('resolving a conflict clears Human Review even when the repo also changed (R3-02)', async () => {
+    // Human Review was latched by the conflict and only ever OR-ed forward, so a row that a
+    // human had since agreed with stayed in the "needs my attention" filter forever.
+    await run(normalize([check(' ')]), T1);
+    target.rows[0].cells['Status'] = 'Blocked';
+    await run(normalize([check('x')]), T2);
+    expect(target.rows[0].cells['Human Review']).toBe(true);
+
+    target.rows[0].cells['Status'] = 'Done';                  // human agrees with the repo
+    await run(normalize([check('x', 'Known issues')]), T3);   // and the repo moved too
+    expect(target.rows[0].cells['Sync Status']).toBe('Updated');
+    expect(target.rows[0].cells['Human Review']).toBe(false); // no longer needs attention
+  });
+
+  it('a human ahead of a stable repository is an update, never a conflict', async () => {
+    // Guards the opposite failure: deriving conflict from "the values differ" alone would
+    // flag every in-progress row, because a person marking an open TODO In Progress always
+    // disagrees with a repo that still reports Not Started.
+    await run(items(ev('src/a.js', 'one')), T1);
+    target.rows[0].cells['Status'] = 'In Progress';
+    const p = await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
+    expect(p.counts.conflict).toBe(0);
+    expect(target.rows[0].cells['Status']).toBe('In Progress');
+    expect(target.rows[0].cells['Sync Status']).toBe('Updated');
+    expect(target.rows[0].cells['Human Review']).toBe(false);
+
+    // ...and it stays that way run after run.
+    const p2 = await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T5);
+    expect(p2.counts.conflict).toBe(0);
+    expect(target.rows[0].cells['Status']).toBe('In Progress');
+  });
+});

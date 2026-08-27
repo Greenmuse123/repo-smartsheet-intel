@@ -9,7 +9,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-export interface ItemState { rowId: number; fingerprint: string; lastWrittenStatus: string; lastWrittenHumanReview: boolean; lastSyncedAt: string }
+export interface ItemState { rowId: number; fingerprint: string; lastWrittenStatus: string; lastSyncedAt: string }
 export interface SyncState { version: 1; sheetId: string; items: Record<string, ItemState>; lastRunAt?: string }
 
 export function loadState(dir: string, sheetId: string): SyncState {
