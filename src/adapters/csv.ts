@@ -9,7 +9,7 @@
  */
 import type { ProjectItem } from '../model/types.js';
 import { COLUMNS, COLUMN_TITLES } from './smartsheet/schema.js';
-import { humanSeedCells, repoCells, sharedCells } from './smartsheet/mapper.js';
+import { humanSeedCells, repoCells, reviewCells, sharedCells } from './smartsheet/mapper.js';
 
 function q(v: unknown): string {
   if (v === null || v === undefined) return '';
@@ -20,7 +20,7 @@ function q(v: unknown): string {
 export function csvFor(items: ProjectItem[], now: string): string {
   const lines = [COLUMN_TITLES.map(q).join(',')];
   for (const it of items) {
-    const cells = { ...repoCells(it, 'New', now), ...humanSeedCells(it), ...sharedCells(it.status, it.humanReviewRequired) };
+    const cells = { ...repoCells(it, 'New', now), ...humanSeedCells(it), ...sharedCells(it.status), ...reviewCells(it.humanReviewRequired) };
     lines.push(COLUMN_TITLES.map((t) => q(cells[t])).join(','));
   }
   return '\uFEFF' + lines.join('\r\n') + '\r\n';

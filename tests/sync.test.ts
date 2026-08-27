@@ -610,3 +610,35 @@ describe('the review baseline must not go stale (round-6 R6-05)', () => {
     expect(row.cells['Human Review']).toBe(false);  // ours, so ours to clear
   });
 });
+
+describe('the tool must never claim a tick that is already a person\u2019s (round-7 self-review)', () => {
+  const T4 = '2026-08-24T13:00:00Z';
+  const check = (c: boolean) => ({
+    extractor: 'readme-checklist',
+    sourceType: c ? 'Markdown checklist (checked)' : 'Markdown checklist (unchecked)',
+    path: 'README.md', line: 3, section: 'S', excerpt: 'ship it',
+  } as RawEvidence);
+
+  it('keeps a human tick through a whole conflict lifecycle', async () => {
+    // `sharedCells` mirrored Repo Review on EVERY write, so any path that forced review on -
+    // a conflict, a restored Status - relabelled a person's existing tick as tool-authored.
+    // Resolving the conflict then cleared it, silently losing their decision. Returning {}
+    // from the guard could not undo it, because sharedCells had already written the cell.
+    await run(normalize([check(false)]), T1);
+    const c = target.rows[0].cells;
+    expect(c['Repo Review']).toBe(false);
+    c['Human Review'] = true;                    // a PERSON ticks it; the tick is theirs
+
+    await run(normalize([check(true)]), T2);     // repo says Done
+    c['Status'] = 'Blocked';                     // human disagrees
+    await run(normalize([check(false)]), T3);    // repo reverts -> both moved -> conflict
+    expect(c['Sync Status']).toBe('Conflict');
+    expect(c['Human Review']).toBe(true);
+    expect(c['Repo Review']).toBe(false);        // still theirs, never claimed
+
+    c['Status'] = String(c['Repo Status']);      // human resolves the disagreement
+    await run(normalize([check(false)]), T4);
+    expect(c['Sync Status']).toBe('Synced');
+    expect(c['Human Review']).toBe(true);        // and their tick is still there
+  });
+});

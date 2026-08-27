@@ -10,7 +10,7 @@
  * Use:  `const plan = planSync(items, rows, state, now)`; `await applyPlan(plan, target, state, now)`.
  */
 import type { PlannedChange, ProjectItem, Status, SyncPlan, SyncStatus } from '../model/types.js';
-import { humanSeedCells, repoCells, sharedCells } from '../adapters/smartsheet/mapper.js';
+import { humanSeedCells, repoCells, reviewCells, sharedCells } from '../adapters/smartsheet/mapper.js';
 import type { SheetTarget, TargetRow, CellValues } from './target.js';
 import type { SyncState } from './state.js';
 import { log } from '../log/logger.js';
@@ -43,7 +43,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     }
     const row = byItemId.get(item.itemId);
     if (!row) {
-      changes.push({ action: 'create', item, cells: { ...repoCells(item, 'New', now), ...humanSeedCells(item), ...sharedCells(item.status, item.humanReviewRequired) }, reasons: ['not in sheet yet'] });
+      changes.push({ action: 'create', item, cells: { ...repoCells(item, 'New', now), ...humanSeedCells(item), ...sharedCells(item.status), ...reviewCells(item.humanReviewRequired) }, reasons: ['not in sheet yet'] });
       continue;
     }
     const st = state.items[item.itemId];
@@ -81,17 +81,19 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // sheet against what WE last wrote. If they differ, a person deliberately (un)checked it,
     // and that decision outranks our recomputation.
     const sheetReview = row.cells['Human Review'] === true;
-    // When we need a row reviewed we must not claim authorship of a tick that is already
-    // there: writing `Repo Review = true` over a person's own true relabels their decision as
-    // ours, and the next ordinary update then clears it. If the box is already ticked, leave
-    // both cells alone and let whoever owns it keep owning it.
-    const askForReview = (): CellValues => (sheetReview ? {} : { 'Human Review': true, 'Repo Review': true });
     // The local cache is written in the same breath as the write it records, so when it exists
     // it is the most reliable answer to "what did WE last write". `Repo Review` is the fallback
     // that survives losing the cache - a mirror, not an override, since a technical cell can go
     // stale (hand-edited, added later to an old sheet, written by an older build).
     const reviewBaseline = st?.lastWrittenHumanReview
       ?? (typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined);
+    // The ONE rule for writing the shared checkbox. We must never claim authorship of a tick
+    // that is already a person's: writing `Repo Review = true` over their own true relabels
+    // their decision as ours, and the next resolve or ordinary update then clears it. When the
+    // box is already ticked and it is theirs, write neither cell.
+    const humanOwnsReview = reviewBaseline !== undefined && sheetReview !== reviewBaseline;
+    const writeReview = (want: boolean): CellValues =>
+      (want && sheetReview && humanOwnsReview ? {} : reviewCells(want));
     let reviewAfterUpdate: boolean;
     if (reviewBaseline !== undefined) {
       // We know what we last wrote: if the sheet differs, a person changed it and wins.
@@ -123,8 +125,8 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
           rowId: row.rowId,
           cells: {
             ...repoCells(item, syncStatus, now),
-            ...sharedCells(sheetStatus !== '' ? (sheetStatus as Status) : item.status, conflicted || humanClearedStatus || reviewAfterUpdate),
-            ...(humanClearedStatus || conflicted ? askForReview() : {}),
+            ...sharedCells(sheetStatus !== '' ? (sheetStatus as Status) : item.status),
+            ...writeReview(conflicted || humanClearedStatus || reviewAfterUpdate),
           },
           reasons,
         });
@@ -141,8 +143,8 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
           rowId: row.rowId,
           cells: {
             ...repoCells(item, 'Synced', now),
-            ...sharedCells(item.status, humanClearedStatus || reviewAfterUpdate),
-            ...(humanClearedStatus ? askForReview() : {}),
+            ...sharedCells(item.status),
+            ...writeReview(humanClearedStatus || reviewAfterUpdate),
           },
           reasons: humanClearedStatus
             ? ['conflict resolved: the sheet now agrees with the repository', `Status had been cleared in the sheet; restored "${item.status}" from the repository`]
@@ -158,7 +160,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
           action: 'update',
           item,
           rowId: row.rowId,
-          cells: { ...repoCells(item, 'Updated', now), ...sharedCells(item.status, true), ...askForReview() },
+          cells: { ...repoCells(item, 'Updated', now), ...sharedCells(item.status), ...writeReview(true) },
           reasons: [`Status had been cleared in the sheet; restored "${item.status}" from the repository and flagged for review`],
         });
         continue;
@@ -214,10 +216,8 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
 
     changes.push({ action, item, rowId: row.rowId, cells: {
       ...repoCells(item, syncStatus, now),
-      ...sharedCells(status, humanReview),
-      // Forcing review on because of a conflict or a cleared Status must not overwrite a
-      // tick that was already a person's own.
-      ...(humanReview && (action === 'conflict' || humanClearedStatus) ? askForReview() : {}),
+      ...sharedCells(status),
+      ...writeReview(humanReview),
     }, reasons });
   }
 

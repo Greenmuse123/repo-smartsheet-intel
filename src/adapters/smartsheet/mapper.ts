@@ -44,9 +44,19 @@ export function humanSeedCells(item: ProjectItem): CellValues {
   return out;
 }
 
-/** Shared fields. */
-export function sharedCells(status: Status, humanReview: boolean): CellValues {
-  // `Repo Review` mirrors what we wrote, so the next run can tell our checkbox from a human's
-  // even with no state file. It is the Human Review analogue of `Repo Status`.
-  return { 'Status': status, 'Human Review': humanReview, 'Repo Review': humanReview };
+/** The shared Status field. The shared checkbox is written separately - see `reviewCells`. */
+export function sharedCells(status: Status): CellValues {
+  return { 'Status': status };
+}
+
+/**
+ * The shared checkbox, written as a pair.
+ *
+ * `Repo Review` mirrors what we wrote, so the next run can tell our checkbox from a person's
+ * even with no state file. It is the Human Review analogue of `Repo Status`, and the two MUST
+ * move together: writing `Human Review` without `Repo Review` strands our own tick, and
+ * writing `Repo Review` over a person's tick relabels their decision as ours.
+ */
+export function reviewCells(humanReview: boolean): CellValues {
+  return { 'Human Review': humanReview, 'Repo Review': humanReview };
 }
