@@ -37,6 +37,8 @@ import { log } from '../log/logger.js';
 function reviewRule(sheetReview: boolean, cache: boolean | undefined, mirror: boolean | undefined): {
   baseline: boolean | undefined;
   humanOwns: boolean;
+  /** True when the two records of OUR value disagree and the mirror is being re-pointed. */
+  drift: boolean;
   write: (want: boolean) => CellValues;
 } {
   const baselines = [cache, mirror].filter((b): b is boolean => b !== undefined);
@@ -45,18 +47,18 @@ function reviewRule(sheetReview: boolean, cache: boolean | undefined, mirror: bo
     // not adopt it as ours either: that only delays the loss by one run, because the next run
     // sees the sheet agreeing with a baseline it thinks is its own and recomputes over it.
     // Leave both cells alone. Only rows that predate the mirror column can be in this state.
-    return { baseline: undefined, humanOwns: true, write: () => ({}) };
+    return { baseline: undefined, humanOwns: true, drift: false, write: () => ({}) };
   }
   if (baselines.length === 2 && baselines[0] !== baselines[1]) {
     // Technical drift: the two records of OUR value disagree, so they cannot both be right and
     // this is not a human edit. Preserve what the sheet shows and re-point the mirror at it, so
     // the next run has one agreed baseline. Without this, a stale mirror could stop the tool
     // ever flagging a row its own model says needs review.
-    return { baseline: sheetReview, humanOwns: true, write: () => ({ 'Repo Review': sheetReview }) };
+    return { baseline: sheetReview, humanOwns: true, drift: true, write: () => ({ 'Repo Review': sheetReview }) };
   }
   const baseline = baselines[0];
   const humanOwns = sheetReview !== baseline;
-  return { baseline, humanOwns, write: (want) => (humanOwns ? {} : reviewCells(want)) };
+  return { baseline, humanOwns, drift: false, write: (want) => (humanOwns ? {} : reviewCells(want)) };
 }
 
 export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncState, now: string): SyncPlan {
@@ -83,6 +85,15 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
   const changes: PlannedChange[] = [];
   const seen = new Set<string>();
 
+  // Two current items can share ONE legacy ID - that is precisely the 32-bit collision the
+  // widening was meant to survive. Adopting on a first-match basis would then attach a human's
+  // Owner and Management Notes to whichever item happened to come first in the scan. Count the
+  // claims and refuse to adopt any ID more than one item could mean.
+  const legacyClaims = new Map<string, number>();
+  for (const it of items) {
+    for (const legacy of it.legacyItemIds ?? []) legacyClaims.set(legacy, (legacyClaims.get(legacy) ?? 0) + 1);
+  }
+
   for (const item of items) {
     seen.add(item.itemId);
     if (duplicateIds.has(item.itemId)) {
@@ -99,14 +110,32 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       // Priority and Management Notes a person had put on them.
       for (const legacy of item.legacyItemIds ?? []) {
         const old = byItemId.get(legacy);
-        if (old && !duplicateIds.has(legacy) && !seen.has(legacy)) { row = old; adoptedFrom = legacy; seen.add(legacy); break; }
+        if (!old || duplicateIds.has(legacy) || seen.has(legacy)) continue;
+        // The candidate is just a string, and any row could happen to carry it. A genuine
+        // legacy row is the SAME item under an older ID, so its Item text must match: identity
+        // is derived from that text, and if the text had changed the ID would have too. Without
+        // this an unrelated row could be adopted and have its repo-controlled fields replaced.
+        if (String(old.cells['Item'] ?? '') !== item.item) {
+          log.warn(`Not adopting sheet row ${legacy}: it carries that older Item ID but its Item text does not match, so it is not the same item.`);
+          continue;
+        }
+        if ((legacyClaims.get(legacy) ?? 0) > 1) {
+          // Ambiguous: more than one of today's items would claim this row. Leave it alone and
+          // let it be flagged Missing in Repo, which is honest, rather than guess and silently
+          // attach one person's notes to the wrong item.
+          log.warn(`Not adopting sheet row ${legacy}: more than one current item has that older Item ID, so which one it belongs to cannot be determined. It will be flagged "Missing in Repo" and the items get fresh rows.`);
+          continue;
+        }
+        row = old; adoptedFrom = legacy; seen.add(legacy); break;
       }
     }
     if (!row) {
       changes.push({ action: 'create', item, cells: { ...repoCells(item, 'New', now), ...humanSeedCells(item), ...sharedCells(item.status), ...reviewCells(item.humanReviewRequired) }, reasons: ['not in sheet yet'] });
       continue;
     }
-    const st = state.items[item.itemId];
+    // Carry the cached baselines across the rename, or adoption would look like a row we have
+    // never written - which is exactly the "no baseline, never converges" state below.
+    const st = state.items[item.itemId] ?? (adoptedFrom ? state.items[adoptedFrom] : undefined);
     const sheetFingerprint = String(row.cells['Repo Fingerprint'] ?? st?.fingerprint ?? '');
     const lastWrittenStatus = String(row.cells['Repo Status'] ?? st?.lastWrittenStatus ?? '');
     const sheetStatus = String(row.cells['Status'] ?? '');
@@ -118,7 +147,12 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     const humanClearedStatus = sheetStatus === '' && lastWrittenStatus !== '';
     const humanChangedStatus = sheetStatus !== '' && sheetStatus !== lastWrittenStatus;
     const repoChangedStatus = item.status !== lastWrittenStatus;
-    const repoChanged = sheetFingerprint !== item.fingerprint;
+    // Adoption must go through the SAME three-way merge as everything else. Writing repoCells
+    // and returning early overwrote `Repo Status` and the fingerprint before the merge ran,
+    // which permanently laundered a genuine both-sides-moved conflict into "Synced". Treating
+    // it as a change also guarantees the write happens - the fingerprint matches, so the
+    // ordinary path would call it unchanged and leave the old ID on the sheet forever.
+    const repoChanged = sheetFingerprint !== item.fingerprint || adoptedFrom !== undefined;
     const sync = String(row.cells['Sync Status'] ?? '');
     // Both flags read the same cell, which is why that cell has to be able to hold both facts.
     const alreadyConflict = sync === 'Conflict' || sync === 'Conflict (missing in repo)';
@@ -159,20 +193,6 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     const humanOwnsReview = rule.humanOwns;
     const writeReview = rule.write;
     const reviewAfterUpdate = humanOwnsReview ? sheetReview : item.humanReviewRequired;
-
-    if (adoptedFrom) {
-      // The row is byte-identical apart from its identity, so the fingerprint matches and the
-      // ordinary path would call it unchanged and write nothing - leaving the old short ID on
-      // the sheet forever. Force the write so the identity is actually rewritten.
-      changes.push({
-        action: 'update',
-        item,
-        rowId: row.rowId,
-        cells: { ...repoCells(item, (String(row.cells['Sync Status'] ?? '') || 'Synced') as SyncStatus, now) },
-        reasons: [`adopted the existing row for ${adoptedFrom}: this item's ID was widened, so its identity was rewritten in place and your columns kept`],
-      });
-      continue;
-    }
 
     if (!repoChanged) {
       // The repository has not moved. Two things can still legitimately need a write:
@@ -234,11 +254,28 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
         });
         continue;
       }
+      // Nothing repo-controlled changed - but the checkbox may still be waiting to converge.
+      // Drift repair only re-points the mirror, so without this the visible value would stay
+      // wrong until some unrelated repository change happened to come along.
+      const pendingReview = writeReview(reviewAfterUpdate);
+      const reviewChanges = Object.entries(pendingReview).some(([k, v]) => row.cells[k] !== v);
+      if (reviewChanges) {
+        changes.push({
+          action: 'update',
+          item,
+          rowId: row.rowId,
+          cells: { ...repoCells(item, (String(row.cells['Sync Status'] ?? '') || 'Synced') as SyncStatus, now), ...pendingReview },
+          reasons: ['review flag brought back into line with the item'],
+        });
+        continue;
+      }
       changes.push({ action: 'unchanged', item, rowId: row.rowId, cells: {}, reasons: [alreadyConflict ? 'fingerprint matches; conflict still unresolved' : 'fingerprint matches'] });
       continue;
     }
 
-    const reasons: string[] = ['repo-controlled fields changed'];
+    const reasons: string[] = adoptedFrom
+      ? [`adopted the existing row for ${adoptedFrom}: this item's Item ID was widened, so its identity was rewritten in place and your columns kept`]
+      : ['repo-controlled fields changed'];
     if (wasMissing) reasons.push('item reappeared in the repository');
 
     // A conflict is a live disagreement between the two Status values - nothing else.
@@ -322,7 +359,32 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       }
       continue;
     }
-    if (sync === 'Missing in Repo') continue; // already flagged
+    if (sync === 'Missing in Repo') {
+      // Already flagged, so there is nothing to say about its Status - but the checkbox can
+      // still be mid-convergence after drift repair, and this loop is the ONLY thing that ever
+      // looks at this row again. Let the shared rule finish what it started.
+      // ONLY repair drift here. The row is already flagged, so its visible checkbox is either
+      // ours from the flagging or a decision a person has since made - either way this pass has
+      // no business changing it. Re-deriving a desired value would re-tick a box a human
+      // cleared when they resolved the row.
+      const rule = reviewRule(
+        row.cells['Human Review'] === true,
+        state.items[id]?.lastWrittenHumanReview,
+        typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
+      );
+      const pending = rule.drift ? rule.write(true) : {};
+      const differs = Object.entries(pending).some(([k, v]) => row.cells[k] !== v);
+      if (differs) {
+        changes.push({
+          action: 'missing',
+          item: { itemId: id, item: String(row.cells['Item'] ?? id) } as ProjectItem,
+          rowId: row.rowId,
+          cells: { ...pending, 'Last Synced': now },
+          reasons: ['still missing; review flag brought back into line'],
+        });
+      }
+      continue;
+    }
     // Flagging a CONFLICTED row as missing must not erase the conflict: it is still unresolved,
     // and the human's decision is the thing most worth preserving. Record both facts.
     const wasConflict = sync === 'Conflict';
@@ -342,7 +404,11 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
 
   const counts = { create: 0, update: 0, unchanged: 0, conflict: 0, missing: 0 };
   for (const c of changes) counts[c.action]++;
-  const humanReviewCount = changes.filter((c) => c.action !== 'unchanged' && c.cells['Human Review'] === true).length;
+  // Count identities, not rows: one item represented by two duplicate rows is still one item
+  // needing a person, and reporting it twice overstates the work.
+  const humanReviewCount = new Set(
+    changes.filter((c) => c.action !== 'unchanged' && c.cells['Human Review'] === true).map((c) => c.item.itemId),
+  ).size;
   return { changes, counts, humanReviewCount };
 }
 
@@ -392,6 +458,11 @@ export async function applyPlan(plan: SyncPlan, target: SheetTarget, state: Sync
 }
 
 function remember(state: SyncState, c: PlannedChange, rowId: number, now: string): void {
+  // An adopted row carried its cache entry over under the old ID; drop it so the file does not
+  // keep a second, stale record of the same row forever.
+  for (const legacy of c.item.legacyItemIds ?? []) {
+    if (legacy !== c.item.itemId) delete state.items[legacy];
+  }
   state.items[c.item.itemId] = {
     rowId,
     fingerprint: c.item.fingerprint,

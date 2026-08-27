@@ -9,6 +9,7 @@ import { log } from '../src/log/logger.js';
 
 log.silent();
 
+const todoFor = (path: string): RawEvidence => ({ extractor: 'todo-comments', sourceType: 'TODO comment', path, line: 10, excerpt: 'TODO: add retry' });
 const ev = (path: string, text: string, over: Partial<RawEvidence> = {}): RawEvidence => ({ extractor: 'todo-comments', sourceType: 'TODO comment', path, line: 1, excerpt: `TODO: ${text}`, ...over });
 const items = (...e: RawEvidence[]): ProjectItem[] => normalize(e);
 const T1 = '2026-08-24T10:00:00Z', T2 = '2026-08-24T11:00:00Z', T3 = '2026-08-24T12:00:00Z';
@@ -850,5 +851,142 @@ describe('round-8 review regressions', () => {
 
     await run(normalize([risk({ commit: 'def5678' })]), T3);  // run 2: normal rules resume
     expect(row.cells['Human Review']).toBe(true);      // and the required flag is applied again
+  });
+});
+
+describe('round-9 review regressions', () => {
+  const T4 = '2026-08-24T13:00:00Z';
+  const risk = (over: Partial<RawEvidence> = {}): RawEvidence => ({
+    extractor: 'risk-heuristics', sourceType: 'Risk heuristic', path: 'src/auth/session.js',
+    line: 5, excerpt: 'FIXME in a security-sensitive file: sessions never expire', ...over,
+  });
+  const check = (c: boolean) => ({
+    extractor: 'readme-checklist',
+    sourceType: c ? 'Markdown checklist (checked)' : 'Markdown checklist (unchecked)',
+    path: 'README.md', line: 3, section: 'S', excerpt: 'ship it',
+  } as RawEvidence);
+
+  it('does not launder a real conflict while adopting a legacy row (R9-01)', async () => {
+    // Adoption used to write repoCells and return early, overwriting Repo Status and the
+    // fingerprint BEFORE the three-way merge ran - so a genuine both-sides-moved disagreement
+    // was silently recorded as Synced and could never be reconstructed.
+    // Build the row so that ONLY its identity is out of date: same fingerprint, but the repo
+    // Status and the human Status have both moved away from the last synced value. The old
+    // code took an early return here and wrote Repo Status + the fingerprint before the merge
+    // could see the disagreement at all.
+    const [fresh] = normalize([check(true)]);
+    await run(normalize([check(true)]), T1);               // repo: Done, fingerprint current
+    const row = target.rows[0];
+    row.cells['Item ID'] = fresh.legacyItemIds![0];        // as an older build left it
+    row.cells['Repo Status'] = 'Not Started';              // the last value WE synced
+    row.cells['Status'] = 'In Progress';                   // a person moved away from it
+    state = { version: 1, sheetId: 'sheet-1', items: {} };
+
+    const p = await run(normalize([check(true)]), T2);     // repo says Done: both sides moved
+    expect(target.rows).toHaveLength(1);
+    expect(row.cells['Item ID']).toBe(fresh.itemId);       // identity still rewritten
+    expect(p.counts.conflict).toBe(1);                     // and the conflict is NOT laundered
+    expect(row.cells['Sync Status']).toBe('Conflict');
+    expect(row.cells['Status']).toBe('In Progress');       // human value kept
+    expect(row.cells['Repo Status']).toBe('Done');
+  });
+
+  it('refuses to adopt a row two different items could both claim (R9-02)', async () => {
+    // The historical 32-bit collision gives two current items ONE legacy ID. Adopting on a
+    // first-match basis attached one person's Owner and Notes to whichever item the scan
+    // happened to reach first, and reversing the scan order reversed the decision.
+    const a = todoFor('src/generated/p42207.ts');
+    const b = todoFor('src/generated/p46459.ts');
+    const [ia, ib] = normalize([a, b]);
+    expect(ia.legacyItemIds![0]).toBe(ib.legacyItemIds![0]); // one legacy ID, two items
+
+    await run(normalize([a]), T1);
+    const row = target.rows[0];
+    row.cells['Item ID'] = ia.legacyItemIds![0];
+    Object.assign(row.cells, { Owner: 'b-owner@example.com', 'Management Notes': 'belongs to B' });
+    state = { version: 1, sheetId: 'sheet-1', items: {} };
+
+    const p = await run(normalize([a, b]), T2);
+    expect(p.counts.create).toBe(2);                       // both get fresh rows
+    expect(row.cells['Owner']).toBe('b-owner@example.com'); // the ambiguous row is untouched
+    expect(row.cells['Management Notes']).toBe('belongs to B');
+    const created = target.rows.filter((r) => r.cells['Item ID'] === ia.itemId || r.cells['Item ID'] === ib.itemId);
+    expect(created).toHaveLength(2);
+    for (const r of created) expect(r.cells['Owner']).toBeUndefined(); // nobody inherits by guess
+  });
+
+  it('finishes converging the checkbox after drift instead of stalling (R9-03)', async () => {
+    // Drift repair writes only the mirror, so the visible value stayed wrong until some
+    // unrelated repository change happened along. Nothing else ever revisits a quiet row.
+    await run(normalize([risk()]), T1);
+    const row = target.rows[0];
+    const id = normalize([risk()])[0].itemId;
+    row.cells['Human Review'] = false;                     // nobody edited this
+    state.items[id].lastWrittenHumanReview = false;
+    row.cells['Repo Review'] = true;                       // the mirror has drifted
+
+    await run(normalize([risk()]), T2);                    // run 1: repair drift, nothing else
+    expect(row.cells['Repo Review']).toBe(false);
+    await run(normalize([risk()]), T3);                    // run 2: no repo change at all...
+    expect(row.cells['Human Review']).toBe(true);          // ...and it still converges
+    const p = await run(normalize([risk()]), T4);          // and then settles
+    expect(p.counts.unchanged).toBe(1);
+  });
+
+  it('a human decision and the state file both survive an adopted rename (R9-03)', async () => {
+    // Adoption looked state up under the NEW id only, so a migrated row arrived with no
+    // baseline at all - the one state the engine can never converge out of.
+    // Migration must not cost a decision or leave a second, stale record behind. The engine
+    // also carries the cached baselines across the rename so an adopted row does not arrive
+    // with no baseline at all - the one state it can never converge out of.
+    const [item] = normalize([risk()]);
+    await run(normalize([risk()]), T1);
+    const row = target.rows[0];
+    expect(row.cells['Human Review']).toBe(true);
+    row.cells['Human Review'] = false;                     // a person clears our flag
+    delete row.cells['Repo Review'];                       // and this sheet has no mirror value
+    row.cells['Item ID'] = item.legacyItemIds![0];
+    state.items[item.legacyItemIds![0]] = state.items[item.itemId];
+    delete state.items[item.itemId];
+
+    await run(normalize([risk()]), T2);
+    expect(row.cells['Item ID']).toBe(item.itemId);
+    expect(row.cells['Human Review']).toBe(false);         // their clear survived the migration
+    expect(state.items[item.legacyItemIds![0]]).toBeUndefined(); // and no stale second record
+  });
+});
+
+describe('legacy adoption must be narrow (round-9 R9-05 / R9-06)', () => {
+  it('refuses a row that merely carries the string, and is not the same item (R9-05)', async () => {
+    // The candidate ID is just text, and any row can carry it. A genuine legacy row is the SAME
+    // item under an older ID, so its Item text must match - identity is derived from that text.
+    const e = ev('src/a.js', 'one');
+    const [item] = items(e);
+    await run(items(ev('src/z.js', 'something else entirely')), T1);
+    const row = target.rows[0];
+    row.cells['Item ID'] = item.legacyItemIds![0];         // unrelated row, right-looking ID
+    const before = { ...row.cells };
+
+    const p = await run(items(e), T2);
+    expect(p.counts.create).toBe(1);                       // the real item gets its own row
+    expect(row.cells['Item']).toBe(before['Item']);        // and the stranger is untouched
+    expect(row.cells['Description']).toBe(before['Description']);
+  });
+
+  it('does not report an adopted row as still Missing in Repo for a run (R9-06)', async () => {
+    // Adoption used to preserve the old Sync Status verbatim, so a migrated row that had been
+    // flagged missing stayed missing for one completed sync before correcting itself.
+    const e = ev('src/a.js', 'one'), other = ev('src/other.js', 'keep me');
+    const [item] = items(e);
+    await run(items(e, other), T1);
+    const row = target.rows.find((r) => r.cells['Item ID'] === item.itemId)!;
+    await run(items(other), T2);                           // it vanishes and is flagged
+    expect(row.cells['Sync Status']).toBe('Missing in Repo');
+
+    row.cells['Item ID'] = item.legacyItemIds![0];         // an older build's identity
+    state = { version: 1, sheetId: 'sheet-1', items: {} };
+    await run(items(e, other), T3);                        // it is back, under the new ID
+    expect(row.cells['Item ID']).toBe(item.itemId);
+    expect(row.cells['Sync Status']).not.toBe('Missing in Repo');
   });
 });
