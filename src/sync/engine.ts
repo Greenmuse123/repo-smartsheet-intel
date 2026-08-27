@@ -13,6 +13,7 @@ import type { PlannedChange, ProjectItem, Status, SyncPlan, SyncStatus } from '.
 import { humanSeedCells, repoCells, reviewCells, sharedCells } from '../adapters/smartsheet/mapper.js';
 import type { SheetTarget, TargetRow, CellValues } from './target.js';
 import type { SyncState } from './state.js';
+import { isPathKeyed } from '../model/ids.js';
 import { log } from '../log/logger.js';
 
 /**
@@ -69,8 +70,28 @@ function reviewRule(sheetReview: boolean, cache: boolean | undefined, mirror: bo
  * Compare the file only, with any discriminator normalised away.
  */
 function sameSourcePath(source: string, repositoryPath: string): boolean {
-  const strip = (v: string) => v.split(' - ')[0].replace(/:\d+$/, '').replace(/\[REDACTED-[0-9a-f]+\]/g, '[REDACTED]');
-  return strip(source) === strip(repositoryPath);
+  // Do NOT split on ' - ': a filename may contain it, and `src/a - one.ts` and `src/a - two.ts`
+  // would both collapse to `src/a`. Match the path as a prefix and require a real boundary.
+  const norm = (v: string) => v.replace(/\[REDACTED-[0-9a-f]+\]/g, '[REDACTED]');
+  const want = norm(repositoryPath);
+  const got = norm(source);
+  if (!got.startsWith(want)) return false;
+  const rest = got.slice(want.length);
+  return rest === '' || rest.startsWith(':') || rest.startsWith(' - ');
+}
+
+/**
+ * Is this sheet row really the same item, under an older ID?
+ *
+ * For most extractors identity is `path | normalized text`, and the Item column IS that text -
+ * so Item equality is identity equality, and two different TODOs in one file are correctly
+ * refused. For the path-keyed extractors identity is the path alone, so their Item text can
+ * legitimately change (a renamed CI job) and only the file can be compared.
+ */
+function looksLikeSameItem(row: TargetRow, item: ProjectItem): boolean {
+  return isPathKeyed(item.itemId)
+    ? sameSourcePath(String(row.cells['Source'] ?? ''), item.repositoryPath)
+    : String(row.cells['Item'] ?? '') === item.item;
 }
 
 export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncState, now: string): SyncPlan {
@@ -130,8 +151,8 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
         // alone, so a job or heading can be renamed without changing the ID at all - and
         // rejecting those left a human-owned row stranded as Missing. Compare the source file
         // instead, which IS part of every identity.
-        if (!sameSourcePath(String(old.cells['Source'] ?? ''), item.repositoryPath)) {
-          log.warn(`Not adopting sheet row ${legacy}: it carries that older Item ID but points at a different file, so it is not the same item.`);
+        if (!looksLikeSameItem(old, item)) {
+          log.warn(`Not adopting sheet row ${legacy}: it carries that older Item ID but is not this item, so its contents are left alone.`);
           continue;
         }
         if ((legacyClaims.get(legacy) ?? 0) > 1) {
@@ -155,9 +176,14 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // the OLD id. A cache under the new id describes a different physical row (one an earlier
     // split created and a person has since deleted), and preferring it made the two records
     // disagree, which reads as drift and ends up clearing a real human tick two runs later.
-    const st = adoptedFrom
-      ? (state.items[adoptedFrom] ?? state.items[item.itemId])
-      : state.items[item.itemId];
+    // Every cache entry records the physical `rowId` it describes. Use it: an entry filed
+    // under either id may belong to a DIFFERENT row (one an earlier split created and a person
+    // has since deleted), and believing it reads as drift and clears a real human tick.
+    const cacheCandidates = [adoptedFrom ? state.items[adoptedFrom] : undefined, state.items[item.itemId]]
+      .filter((c): c is NonNullable<typeof c> => c !== undefined);
+    const st = cacheCandidates.find((c) => c.rowId === row.rowId) ?? cacheCandidates[0];
+    // A cache that describes some other row tells us nothing about what we wrote to THIS one.
+    const stForReview = cacheCandidates.find((c) => c.rowId === row.rowId);
     const sheetFingerprint = String(row.cells['Repo Fingerprint'] ?? st?.fingerprint ?? '');
     const lastWrittenStatus = String(row.cells['Repo Status'] ?? st?.lastWrittenStatus ?? '');
     const sheetStatus = String(row.cells['Status'] ?? '');
@@ -209,7 +235,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // cleared one loses a decision silently.
     const rule = reviewRule(
       sheetReview,
-      st?.lastWrittenHumanReview,
+      stForReview?.lastWrittenHumanReview,
       typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
     );
     const humanOwnsReview = rule.humanOwns;
@@ -276,11 +302,33 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
         });
         continue;
       }
+      if (conflicted && !alreadyConflict) {
+        // The fingerprint says nothing repo-controlled moved, but `Repo Status` - the merge
+        // baseline - is stale, and against it both sides HAVE moved and disagree. Without this
+        // the disagreement was computed and then dropped on the floor, leaving the row Synced
+        // forever with two visibly different Status values.
+        changes.push({
+          action: 'conflict',
+          item,
+          rowId: row.rowId,
+          cells: {
+            ...repoCells(item, 'Conflict', now),
+            ...sharedCells(sheetStatus as Status),
+            ...writeReview(true),
+          },
+          reasons: [`status conflict: sheet says "${sheetStatus}", repo says "${item.status}", last synced "${lastWrittenStatus || '(none)'}"`],
+        });
+        continue;
+      }
+
       // Nothing repo-controlled changed - but the checkbox may still be waiting to converge.
       // Drift repair only re-points the mirror, so without this the visible value would stay
       // wrong until some unrelated repository change happened to come along.
       const pendingReview = writeReview(reviewAfterUpdate);
-      const reviewChanges = Object.entries(pendingReview).some(([k, v]) => row.cells[k] !== v);
+      // Drift must be repaired even when the mirror ALREADY shows the visible value: in that
+      // case the write changes no cell, but it is the only thing that makes `remember()` run
+      // and bring the local cache back into line. Without it the two records disagree forever.
+      const reviewChanges = rule.drift || Object.entries(pendingReview).some(([k, v]) => row.cells[k] !== v);
       if (reviewChanges) {
         // ONLY the review cells. `repoCells` would rewrite `Repo Status` and `Repo Fingerprint`
         // - the merge baselines - for what is a checkbox repair, and on a row whose Status
@@ -484,6 +532,12 @@ export async function applyPlan(plan: SyncPlan, target: SheetTarget, state: Sync
 }
 
 function remember(state: SyncState, c: PlannedChange, rowId: number, now: string): void {
+  // What WE last wrote to the checkbox, carried forward when this write deliberately left the
+  // cell alone. It must come from the entry describing THIS physical row: an entry under either
+  // id can belong to a row an earlier split created and a person has since deleted, and reading
+  // that one put a stale value straight back after planning had correctly ignored it.
+  const carried = [state.items[c.item.itemId], ...(c.item.legacyItemIds ?? []).map((l) => state.items[l])]
+    .find((e) => e !== undefined && e.rowId === rowId)?.lastWrittenHumanReview;
   // An adopted row carried its cache entry over under the old ID; drop it so the file does not
   // keep a second, stale record of the same row forever.
   for (const legacy of c.item.legacyItemIds ?? []) {
@@ -503,7 +557,7 @@ function remember(state: SyncState, c: PlannedChange, rowId: number, now: string
       ? (c.cells as CellValues)['Human Review'] === true
       : (c.cells as CellValues)['Repo Review'] !== undefined
         ? (c.cells as CellValues)['Repo Review'] === true
-        : state.items[c.item.itemId]?.lastWrittenHumanReview,
+        : carried,
     lastSyncedAt: now,
   };
 }

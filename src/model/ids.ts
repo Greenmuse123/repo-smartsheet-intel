@@ -57,6 +57,18 @@ export function itemIdFor(ev: RawEvidence): string {
  * planner adopts the old row and rewrites its `Item ID` in place - the human columns are never
  * touched, so they simply carry over.
  */
+/**
+ * Extractors whose identity is the PATH alone - so their displayed Item text can change (a
+ * renamed CI job, a re-titled ADR) without the identity moving at all.
+ */
+const PATH_KEYED = new Set(['ci', 'tests', 'adr']);
+
+/** Is this item's identity the path alone, rather than path + text? */
+export function isPathKeyed(itemId: string): boolean {
+  const code = itemId.split('-')[1] ?? '';
+  return [...PATH_KEYED].some((e) => CODE[e] === code);
+}
+
 export function legacyItemIdsFor(ev: RawEvidence): string[] {
   const full = createHash('sha1').update(identityKey(ev)).digest('hex');
   const code = CODE[ev.extractor] ?? 'XX';

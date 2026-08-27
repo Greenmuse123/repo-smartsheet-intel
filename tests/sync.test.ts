@@ -1020,20 +1020,41 @@ describe('round-10 review regressions', () => {
 
   it('repairs the review flag without rewriting the merge baselines (R10-02)', async () => {
     // The convergence write spread repoCells, which rewrites Repo Status and Repo Fingerprint.
-    // On a row whose Status baseline was stale that silently destroyed a genuine both-sides-
-    // moved conflict - the same mistake the legacy-adoption branch had made.
+    // A checkbox repair has no business touching the merge baselines - that is how the
+    // legacy-adoption branch destroyed a conflict one round earlier.
     await run(normalize([risk()]), T1);
     const row = target.rows[0];
     const id = normalize([risk()])[0].itemId;
-    row.cells['Repo Status'] = 'Not Started';               // the last value WE synced
-    row.cells['Status'] = 'In Progress';                    // a person moved away from it
+    const baselineBefore = row.cells['Repo Status'];
+    const fingerprintBefore = row.cells['Repo Fingerprint'];
     row.cells['Human Review'] = false;
     state.items[id].lastWrittenHumanReview = false;
     row.cells['Repo Review'] = true;                        // drift, to force the repair path
 
-    await run(normalize([risk()]), T2);
-    expect(row.cells['Repo Status']).toBe('Not Started');   // the baseline is NOT clobbered
-    expect(row.cells['Status']).toBe('In Progress');        // and the human value is untouched
+    const p = await run(normalize([risk()]), T2);
+    expect(p.changes[0].reasons.join(' ')).toMatch(/review flag/);
+    expect(Object.keys(p.changes[0].cells).sort()).toEqual(['Last Synced', 'Repo Review']);
+    expect(row.cells['Repo Status']).toBe(baselineBefore);  // baselines untouched
+    expect(row.cells['Repo Fingerprint']).toBe(fingerprintBefore);
+  });
+
+  it('surfaces a conflict hiding behind a current fingerprint (R10-02b)', async () => {
+    // The fingerprint can match while `Repo Status` - the merge baseline - is stale, on an
+    // imported or hand-repaired sheet. Both sides have then moved and disagree, but the
+    // disagreement was computed and dropped on the floor, leaving the row Synced forever with
+    // two visibly different Status values.
+    await run(normalize([risk()]), T1);
+    const row = target.rows[0];
+    expect(row.cells['Sync Status']).toBe('New');
+    row.cells['Repo Status'] = 'Not Started';               // stale baseline
+    row.cells['Status'] = 'In Progress';                    // human moved away from it
+    row.cells['Sync Status'] = 'Synced';
+
+    const p = await run(normalize([risk()]), T2);           // repo says Unknown: both moved
+    expect(p.counts.conflict).toBe(1);
+    expect(row.cells['Sync Status']).toBe('Conflict');
+    expect(row.cells['Status']).toBe('In Progress');        // human value still wins
+    expect(row.cells['Repo Status']).toBe('Unknown');       // and ours is surfaced
   });
 
   it('adopts a path-keyed item whose displayed text changed (R10-03)', async () => {
@@ -1061,5 +1082,77 @@ describe('round-10 review regressions', () => {
     expect(target.rows).toHaveLength(1);
     expect(row.cells['Item ID']).toBe(after.itemId);
     expect(row.cells['Owner']).toBe('human@example.com');   // their column carried over
+  });
+});
+
+describe('round-11 review regressions', () => {
+  const risk = (over: Partial<RawEvidence> = {}): RawEvidence => ({
+    extractor: 'risk-heuristics', sourceType: 'Risk heuristic', path: 'src/auth/session.js',
+    line: 5, excerpt: 'FIXME in a security-sensitive file: sessions never expire', ...over,
+  });
+
+  it('ignores a cache entry that describes a different physical row (R10-01)', async () => {
+    // Every cache entry records the rowId it describes, and the planner never checked it. An
+    // entry left behind by a row a person has since deleted then read as drift, and the tool
+    // cleared a real human tick.
+    await run(items(ev('src/a.js', 'one')), T1);
+    const row = target.rows[0];
+    const [item] = items(ev('src/a.js', 'one'));
+    row.cells['Human Review'] = true;                     // a person ticks it
+    // ...and a leftover entry for some OTHER row claims we last wrote true.
+    state.items[item.itemId] = { ...state.items[item.itemId], rowId: 999999, lastWrittenHumanReview: true };
+
+    await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
+    expect(row.cells['Human Review']).toBe(true);
+    await run(items(ev('src/a.js', 'one', { commit: 'def5678' })), T3);
+    expect(row.cells['Human Review']).toBe(true);          // still theirs two runs later
+  });
+
+  it('refuses to adopt a different TODO that lives in the same file (R10-03)', async () => {
+    // Source-file equality is not item equality: two TODOs share one file. For text-keyed
+    // extractors the Item text IS the identity, so it is the right thing to compare.
+    const a: RawEvidence = { extractor: 'todo-comments', sourceType: 'TODO comment', path: 'src/shared.ts', line: 1, excerpt: 'TODO: first thing' };
+    const b: RawEvidence = { extractor: 'todo-comments', sourceType: 'TODO comment', path: 'src/shared.ts', line: 9, excerpt: 'TODO: second thing' };
+    const [ia] = normalize([a]);
+    await run(normalize([b]), T1);                         // the sheet holds item B
+    const row = target.rows[0];
+    row.cells['Item ID'] = ia.legacyItemIds![0];           // but wearing A's older ID
+    row.cells['Owner'] = 'owner-of-b@example.com';
+
+    const p = await run(normalize([a]), T2);
+    expect(p.counts.create).toBe(1);                       // A gets its own row
+    expect(row.cells['Owner']).toBe('owner-of-b@example.com');
+    expect(row.cells['Item']).toBe('second thing');        // B's row is left entirely alone
+  });
+
+  it('does not confuse two files whose names contain " - " (R10-03)', async () => {
+    // Splitting Source on ' - ' collapsed `src/a - one.ts` and `src/a - two.ts` to `src/a`.
+    const ci = (path: string, section: string): RawEvidence => ({
+      extractor: 'ci', sourceType: 'CI workflow', path, line: 1, section, excerpt: 'CI',
+    });
+    const [one] = normalize([ci('.github/workflows/a - one.yml', 'j1')]);
+    await run(normalize([ci('.github/workflows/a - two.yml', 'j2')]), T1);
+    const row = target.rows[0];
+    row.cells['Item ID'] = one.legacyItemIds![0];
+    row.cells['Owner'] = 'owner-of-two@example.com';
+
+    const p = await run(normalize([ci('.github/workflows/a - one.yml', 'j1')]), T2);
+    expect(p.counts.create).toBe(1);
+    expect(row.cells['Owner']).toBe('owner-of-two@example.com');
+  });
+
+  it('repairs a drifted cache even when the mirror already shows the visible value (R9-03)', async () => {
+    // Drift where the mirror already equals the sheet writes no cell, so nothing made
+    // remember() run and the local cache stayed wrong - every run, forever.
+    await run(normalize([risk()]), T1);
+    const row = target.rows[0];
+    const id = normalize([risk()])[0].itemId;
+    expect(row.cells['Human Review']).toBe(true);
+    state.items[id].lastWrittenHumanReview = false;         // cache drifted away from the mirror
+
+    await run(normalize([risk()]), T2);
+    expect(state.items[id].lastWrittenHumanReview).toBe(true);  // cache repaired
+    const p = await run(normalize([risk()]), T3);
+    expect(p.counts.unchanged).toBe(1);                        // and then it settles
   });
 });
