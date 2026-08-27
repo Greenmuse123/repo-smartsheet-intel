@@ -6,14 +6,20 @@ Turns an existing software repository into an accurate, traceable, human-reviewa
 Repository → Scanner → Extractors → Normalized Project Model → Validation / Confidence → Sync Engine → Smartsheet
 ```
 
-**Three promises, stated precisely:**
+**Four promises, stated precisely:**
 1. **It does not copy a value into a fact column unless the repository literally states it.** Owner, priority, dates and milestones stay blank otherwise. The one deliberate inference is `Status`: a TODO that is still present is recorded as `Not Started`, because the comment describing the work still exists. That is a documented rule, not a fact read out of the file, and it is the only place the tool asserts something the repository did not say.
 2. **Every row carries its provenance** - the file, and the line where evidence has one. Repository-wide heuristics (for example "package.json has no lockfile") cite `(repository)` because they are about the repo as a whole, not a line.
-3. **It never silently overwrites a decision a person made in the sheet.** Human-controlled columns are written on create only; a disagreement over `Status` is surfaced as a Conflict with the human's value kept. The one case where it does write over you is an emptied `Status` cell: a blank Status breaks every report and rollup, so the repository value is restored - and the row is flagged for review with a reason saying exactly that, never quietly.
+3. **A disagreement is never resolved silently.** When both sides moved and landed somewhere
+   different, the row becomes a **Conflict** with your value kept. When only the sheet's own
+   technical baseline was stale - which happens on imported or hand-repaired sheets, and means
+   the repository has not actually moved - the baseline is repaired instead, and if you are
+   sitting on a different Status the row is flagged for you with a reason. Neither case picks a
+   winner on your behalf.
+4. **It never silently overwrites a decision a person made in the sheet.** Human-controlled columns are written on create only. The one case where it does write over you is an emptied `Status` cell: a blank Status breaks every report and rollup, so the repository value is restored - and the row is flagged for review with a reason saying exactly that, never quietly.
 
 - Works with **or without** Smartsheet API access (CSV fallback).
 - `sync --dry-run` shows every change before anything is written.
-- 125 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, the required-column guard on the real Smartsheet target, invalid credentials, authorization vs. token errors, plan-restriction errors, rate-limit retries, and dry-run safety. They run against a fake `fetch`; no test performs a live API call.
+- 127 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, the required-column guard on the real Smartsheet target, invalid credentials, authorization vs. token errors, plan-restriction errors, rate-limit retries, and dry-run safety. They run against a fake `fetch`; no test performs a live API call.
 
 ---
 
@@ -66,13 +72,15 @@ Run step 4 (or 5) again whenever the code changes.
 | AI Suggestion | The program's guesses and notes. Never treated as fact. |
 | Management Notes | Your free-text space. The program never touches it. |
 
-The columns to the right of Sync Status are technical (Repo Status, Repo Review, Source Commit, Last Synced, Repo Fingerprint). Hide them if you like; the program needs them to stay honest.
+The columns to the right of Sync Status are technical (Repo Status, Repo Path, Repo Review, Source Commit, Last Synced, Repo Fingerprint). Hide them if you like; the program needs them to stay honest.
 
 ### What happens when something changes?
 
 - A new note appears in the code → a new row.
 - A note's wording, file, or status changes in the code → the same row is updated and marked **Updated**.
 - You changed Status in the sheet and the code did not → your value stays.
+There are two kinds of disagreement, and they are handled differently:
+
 - You changed Status **and** the code changed it too, and they disagree → your value stays, the code's value goes into **Repo Status**, the row is marked **Conflict** and **Human Review** is ticked.
 - A note disappears from the code → the row stays, marked **Missing in Repo**, for you to close or merge.
 
@@ -131,7 +139,7 @@ app/
     adapters/csv.ts          CSV + column-definitions fallback
     report/report.ts         Repository Intelligence Report
     log/logger.ts            plain-language logging
-  tests/                     vitest suites (125 tests)
+  tests/                     vitest suites (127 tests)
   examples/sample-repo/      "Orderly" demo repository + sample-repo.project-config.yaml
   docs/                      DATA-MAPPING.md · smartsheet-import.md · DEMO.md
 ```
@@ -141,7 +149,7 @@ app/
 ```
 cd app
 npm install
-npm test          # 125 tests
+npm test          # 127 tests
 npm run typecheck
 ```
 
@@ -297,7 +305,7 @@ The computer reads the sticky notes inside the toy box, copies them neatly onto 
 - **Identity is a deterministic digest, and that is a trade-off:** `Item ID` is
   `sha1(path | normalized text)[0:12]`, unsalted. That is what lets a fresh clone with no state
   file rebuild identity from the sheet alone - but it also means an observer who can guess a
-  candidate path can confirm the guess offline, and it is 48 bits, widened from 32 after a brute-force
+  candidate path - or a candidate line of text, which is just as guessable - can confirm the guess offline, and it is 48 bits, widened from 32 after a brute-force
   search found a real collision between two ordinary generated paths in a few million tries. Salting would break state-free reconstruction, so the
   digest stays; collisions are detected rather than silently merged (the planner warns when two
   rows claim one `Item ID`), and paths are redacted before publication.
@@ -307,6 +315,11 @@ The computer reads the sticky notes inside the toy box, copies them neatly onto 
   then on it never writes that checkbox again, whether you leave it or clear it. A warning you
   can dismiss for good is worth more than one that keeps coming back, and the cost is that this
   row will not be flagged automatically again.
+- **If you lose `state.json`, one ownership case cannot be reconstructed:** the sheet records
+  the last value this tool wrote to `Human Review`, but not who changed it last. So if the tool
+  ticked a row, you cleared it, the state file was then lost, and you later tick it again by
+  hand, the next repository change can read that tick as the tool's own and clear it. Keeping
+  the state file (it lives in `.repo-smartsheet/`) avoids this entirely.
 - **One thing the tool will not do:** if a row has no record of what this tool last wrote to
   `Human Review` - no `Repo Review` value and no local cache, which happens on rows imported by
   hand or created before that column existed - it can never tell its own tick from a person's.
@@ -330,4 +343,4 @@ The computer reads the sticky notes inside the toy box, copies them neatly onto 
 - **State management:** local `state.json` is a cache; `Item ID` + `Repo Fingerprint` + `Repo Status` + `Repo Review` in the sheet are sufficient to rebuild it (tested). Those four plus `Sync Status` are enforced as required columns: `SmartsheetTarget` refuses to sync a sheet missing any of them rather than silently mislabelling edits.
 - **Security:** sensitive-path gate before ignore rules, regex redaction at the excerpt boundary, env-only credentials, no repo writes.
 - **Conflict handling:** human-controlled columns written on create only; shared columns merged; conflicts keep the human value and flag.
-- **Testing:** 125 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.
+- **Testing:** 127 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.

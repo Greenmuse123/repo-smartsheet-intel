@@ -35,6 +35,7 @@ export const COLUMNS: ColumnDef[] = [
   { title: 'Sync Status', type: 'PICKLIST', options: [...SYNC_STATUSES], writtenBy: 'repo', purpose: 'New / Synced / Updated / Conflict / Missing in Repo / Conflict (missing in repo) / Error.' },
   { title: 'AI Suggestion', type: 'TEXT_NUMBER', writtenBy: 'repo', technical: true, purpose: 'Interpretation, never fact. Heuristics and optional LLM notes.' },
   { title: 'Repo Status', type: 'PICKLIST', options: [...STATUSES], writtenBy: 'repo', technical: true, purpose: 'What the repository currently says the status is (basis for conflict detection).' },
+  { title: 'Repo Path', type: 'TEXT_NUMBER', writtenBy: 'repo', technical: true, purpose: 'The exact repository path this row is for. Machine-readable twin of Source, which is written for people to read.' },
   { title: 'Repo Review', type: 'CHECKBOX', writtenBy: 'repo', technical: true, purpose: 'The Human Review value this tool last wrote. Lets a person\'s own tick be told from ours without a local state file.' },
   { title: 'Source Commit', type: 'TEXT_NUMBER', writtenBy: 'repo', technical: true, purpose: 'Short commit SHA of the evidence.' },
   { title: 'Management Notes', type: 'TEXT_NUMBER', writtenBy: 'human', purpose: 'Free text for PMs. Never touched by sync.' },

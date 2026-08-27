@@ -18,6 +18,11 @@ export function trunc(s: string | undefined): string | null {
 export function repoCells(item: ProjectItem, syncStatus: SyncStatus, now: string): CellValues {
   return {
     'Item ID': item.itemId,
+    // The machine-readable twin of `Source`. `Source` is built for a person to read - path,
+    // then an optional line, then the evidence type - and cannot be parsed back reliably,
+    // because a filename may itself contain the separators. Anything the engine needs to
+    // COMPARE gets its own column; see `Repo Status` and `Repo Review`.
+    'Repo Path': item.repositoryPath,
     'Item': trunc(item.item),
     'Type': item.type,
     'Component': item.component,

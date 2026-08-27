@@ -1067,7 +1067,7 @@ describe('the tool never guesses which old row belongs to which item (round-15)'
     expect(p.counts.create).toBe(0);
     expect(p.counts.update).toBe(0);
     expect(row.cells['Item']).toBe(before['Item']);        // untouched
-    expect(p.changes[0].reasons.join(' ')).toMatch(/points at a different file/);
+    expect(p.changes[0].reasons.join(' ')).toMatch(/is for a different file/);
   });
 });
 
@@ -1228,5 +1228,41 @@ describe('round-17 review regressions', () => {
     state = { version: 1, sheetId: 'sheet-1', items: {} }; // and the cache is gone
     await run(normalize([risk({ commit: 'abc1234' })]), T3);
     expect(row.cells['Human Review']).toBe(false);
+  });
+});
+
+describe('round-18 review regressions', () => {
+  it('is not fooled by a filename that begins like another one (R18-01)', async () => {
+    // The guard parsed the human-readable Source, which is `path[:line] - evidence type`. A
+    // filename can contain those separators, so `src/a.ts - evil.ts` produces a Source that
+    // begins exactly like `src/a.ts` and was accepted as the same file. No parsing can tell
+    // them apart, which is why the path now has its own machine-readable column.
+    for (const impostor of ['src/a.ts - evil.ts', 'src/a.ts:evil.ts']) {
+      target = new MemoryTarget(COLUMN_TITLES, 'sheet-1');
+      state = { version: 1, sheetId: 'sheet-1', items: {} };
+      await run(items(ev(impostor, 'other')), T1);
+      const row = target.rows[0];
+      const [mine] = items(ev('src/a.ts', 'one'));
+      row.cells['Item ID'] = mine.itemId;                  // the collision this guard contains
+      row.cells['Owner'] = 'owner-of-impostor@example.com';
+      const before = { ...row.cells };
+
+      const p = await run(items(ev('src/a.ts', 'one')), T2);
+      expect(p.counts.update, impostor).toBe(0);
+      expect(row.cells['Item'], impostor).toBe(before['Item']);
+      expect(row.cells['Owner'], impostor).toBe('owner-of-impostor@example.com');
+    }
+  });
+
+  it('does not strand a row written before the Repo Path column existed (R18-02)', async () => {
+    // An older row has no Repo Path at all. Refusing those would leave them permanently
+    // unwritable AND unflagged, because the item's ID is already accounted for.
+    await run(items(ev('src/a.js', 'one')), T1);
+    const row = target.rows[0];
+    delete row.cells['Repo Path'];                         // as an older build left it
+
+    const p = await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
+    expect(p.counts.update).toBe(1);
+    expect(row.cells['Repo Path']).toBe('src/a.js');       // and it is filled in
   });
 });

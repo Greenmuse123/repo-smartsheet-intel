@@ -61,27 +61,6 @@ function reviewRule(sheetReview: boolean, cache: boolean | undefined, mirror: bo
   return { baseline, humanOwns, drift: false, write: (want) => (humanOwns ? {} : reviewCells(want)) };
 }
 
-/**
- * Does a sheet row's `Source` point at the same file as this item?
- *
- * `Source` is `path[:line] - evidence type…`, and a redacted path carries a discriminator
- * derived from the row's own Item ID - which is exactly what changes when the ID is widened.
- * Compare the file only, with any discriminator normalised away.
- */
-function sameSourcePath(source: string, repositoryPath: string): boolean {
-  // Compared EXACTLY, discriminator and all. An earlier version normalised `[REDACTED-abc12345]`
-  // down to `[REDACTED]` so that a path could still be matched after the Item ID changed length;
-  // that was only ever needed by legacy-row adoption, which no longer exists. Keeping it turned
-  // two different secret-bearing paths into the same string - which is precisely what the
-  // discriminator is there to prevent - and let one item's row be written over another's.
-  //
-  // Do NOT split on ' - ': a filename may contain it, and `src/a - one.ts` and `src/a - two.ts`
-  // would both collapse to `src/a`. Match the path as a prefix and require a real boundary.
-  if (!source.startsWith(repositoryPath)) return false;
-  const rest = source.slice(repositoryPath.length);
-  return rest === '' || rest.startsWith(':') || rest.startsWith(' - ');
-}
-
 export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncState, now: string): SyncPlan {
   const byItemId = new Map<string, TargetRow>();
   const allRowsForId = new Map<string, TargetRow[]>();
@@ -114,16 +93,17 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       continue;
     }
     const row = byItemId.get(item.itemId);
-    // Gate on the Source column, not on the fingerprint: a row can carry a Source and no
-    // fingerprint (imported, hand-made, or written by something else), and requiring a
-    // fingerprint let exactly those rows be overwritten while their Owner and Notes stayed on
-    // them. A blank Source says nothing either way, so it is left to the normal path.
-    if (row && String(row.cells['Source'] ?? '') !== '' && !sameSourcePath(String(row.cells['Source'] ?? ''), item.repositoryPath)) {
+    // Compare the machine-readable `Repo Path`, never the human-readable `Source`. Source is
+    // `path[:line] - evidence type`, and a filename may contain those separators, so no amount
+    // of parsing tells the two apart: `src/a.ts - evil.ts` is a real file whose Source begins
+    // exactly like `src/a.ts`. A blank `Repo Path` means the row predates the column and says
+    // nothing either way, so it takes the normal path rather than being stranded.
+    if (row && String(row.cells['Repo Path'] ?? '') !== '' && String(row.cells['Repo Path']) !== item.repositoryPath) {
       // The row carries this Item ID but points at a different file. Identity always includes
       // the path, so this cannot be the same item: the ID was hand-edited, or two identities
       // collided. Either way, writing this item's content over that row would destroy whatever
       // it actually describes, along with the Owner and Notes somebody put on it.
-      changes.push({ action: 'unchanged', item, cells: {}, reasons: [`skipped: the sheet row using Item ID ${item.itemId} points at a different file (${String(row.cells['Source'] ?? '')}), so it is not this item. Fix or remove that row and re-run.`] });
+      changes.push({ action: 'unchanged', item, cells: {}, reasons: [`skipped: the sheet row using Item ID ${item.itemId} is for a different file (${String(row.cells['Repo Path'] ?? '')}), so it is not this item. Fix or remove that row and re-run.`] });
       continue;
     }
     if (!row) {
