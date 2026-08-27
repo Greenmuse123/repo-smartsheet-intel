@@ -44,7 +44,17 @@ export function normalize(evidence: RawEvidence[], opts: NormalizeOptions = {}):
   const seen = new Set<string>();
   for (const raw of evidence) {
     if (raw.extractor === 'codeowners') continue; // used for owner seeding only, not an item
-    const ev: RawEvidence = { ...raw, excerpt: redact(raw.excerpt).text };
+    // Redact EVERY free-text field that can reach a sheet cell, the CSV, a log line or
+    // the optional AI payload - not just the excerpt. `section` carries TODO metadata such
+    // as TODO(alice@example.com), which becomes Owner; `path` can itself embed a credential.
+    const ev: RawEvidence = {
+      ...raw,
+      excerpt: redact(raw.excerpt).text,
+      section: raw.section === undefined ? undefined : redact(raw.section).text,
+      path: redact(raw.path).text,
+      sourceType: redact(raw.sourceType).text,
+      refs: raw.refs?.map((r) => redact(r).text),
+    };
     const base = build(ev, opts);
     if (!base) continue;
     const itemId = itemIdFor(ev);

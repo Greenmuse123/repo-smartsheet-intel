@@ -80,3 +80,30 @@ describe('schema', () => {
     expect(COLUMNS.filter((c) => c.writtenBy === 'human').map((c) => c.title)).toEqual(['Priority', 'Owner', 'Dependency', 'Milestone', 'Due Date', 'Management Notes']);
   });
 });
+
+describe('hardening found by adversarial review', () => {
+  it('chunk() refuses a non-positive size instead of looping forever', () => {
+    expect(() => chunk([1, 2, 3], 0)).toThrow(RangeError);
+    expect(() => chunk([1, 2, 3], -1)).toThrow(RangeError);
+    expect(chunk([1, 2, 3], 2)).toEqual([[1, 2], [3]]);
+  });
+
+  it('maps a 403 plan restriction (1013) to plan guidance, not a sheet-sharing message', async () => {
+    const { fetchImpl } = fakeFetch([{ status: 403, body: { errorCode: 1013, message: 'not available for your plan' } }]);
+    const c = new SmartsheetClient({ token: 't', fetchImpl, sleep: noSleep });
+    let err: SmartsheetError | undefined;
+    try { await c.createSheet(sheetCreateBody('X')); } catch (e) { err = e as SmartsheetError; }
+    expect(err).toBeInstanceOf(SmartsheetError);
+    expect(err!.status).toBe(403);
+    expect(err!.message).toMatch(/plan does not allow/);
+    expect(err!.resolution).toMatch(/Business plan/);
+    // and it must NOT tell the user to share a sheet that does not exist yet
+    expect(err!.message).not.toMatch(/edit this sheet/);
+  });
+
+  it('does not report an unrecognised update response as a fully successful batch', async () => {
+    const { fetchImpl } = fakeFetch([{ status: 200, body: { result: { unexpected: true } } }]);
+    const c = new SmartsheetClient({ token: 't', fetchImpl, sleep: noSleep });
+    await expect(c.updateRows(1, [{ id: 1, cells: [] }])).rejects.toMatchObject({ name: 'SmartsheetError', message: /unrecognised response/ });
+  });
+});

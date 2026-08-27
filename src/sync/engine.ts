@@ -17,7 +17,17 @@ import { log } from '../log/logger.js';
 
 export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncState, now: string): SyncPlan {
   const byItemId = new Map<string, TargetRow>();
-  for (const r of rows) { const id = r.cells['Item ID']; if (typeof id === 'string' && id) byItemId.set(id, r); }
+  const duplicateIds = new Set<string>();
+  for (const r of rows) {
+    const id = r.cells['Item ID'];
+    if (typeof id !== 'string' || !id) continue;
+    if (byItemId.has(id)) duplicateIds.add(id); // two rows claim the same identity
+    byItemId.set(id, r);
+  }
+  if (duplicateIds.size) {
+    // Silently keeping only the last row would let the sheet drift forever without anyone knowing.
+    log.warn(`${duplicateIds.size} Item ID(s) appear on more than one row: ${[...duplicateIds].join(', ')}. Only the last row of each is synchronized; a human should merge or delete the extras.`);
+  }
 
   const changes: PlannedChange[] = [];
   const seen = new Set<string>();
@@ -38,9 +48,24 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     const repoChanged = sheetFingerprint !== item.fingerprint;
     const alreadyConflict = row.cells['Sync Status'] === 'Conflict';
 
-    if (!repoChanged) {
+    const wasMissing = row.cells['Sync Status'] === 'Missing in Repo';
+
+    if (!repoChanged && !wasMissing) {
       // Nothing new from the repo. If a human resolved a conflict we leave everything alone.
       changes.push({ action: 'unchanged', item, rowId: row.rowId, cells: {}, reasons: ['fingerprint matches'] });
+      continue;
+    }
+
+    if (!repoChanged && wasMissing) {
+      // The item is back and identical. Fingerprint equality alone would return "unchanged"
+      // and leave the row flagged Missing in Repo forever, which is simply untrue.
+      changes.push({
+        action: 'update',
+        item,
+        rowId: row.rowId,
+        cells: { ...repoCells(item, 'Synced', now), ...sharedCells(sheetStatus !== '' ? (sheetStatus as Status) : item.status, item.humanReviewRequired || Boolean(row.cells['Human Review'])) },
+        reasons: ['item reappeared in the repository unchanged; clearing "Missing in Repo"'],
+      });
       continue;
     }
 
@@ -63,7 +88,21 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     } else if (repoChangedStatus) {
       reasons.push(`status ${lastWrittenStatus || '(none)'} → ${item.status}`);
     }
-    if (alreadyConflict && action !== 'conflict') reasons.push('previous conflict cleared by new repo change');
+    if (alreadyConflict && action !== 'conflict') {
+      // A conflict is resolved by a HUMAN making the sheet agree, never by an unrelated
+      // repository edit. Clearing it while the two sides still disagree silently discards
+      // the disagreement the row exists to surface.
+      const stillDisagrees = sheetStatus !== '' && sheetStatus !== item.status;
+      if (stillDisagrees) {
+        action = 'conflict';
+        syncStatus = 'Conflict';
+        status = sheetStatus as Status;
+        humanReview = true;
+        reasons.push(`conflict still unresolved: sheet says "${sheetStatus}", repo says "${item.status}"`);
+      } else {
+        reasons.push('previous conflict resolved: sheet and repo now agree');
+      }
+    }
 
     changes.push({ action, item, rowId: row.rowId, cells: { ...repoCells(item, syncStatus, now), ...sharedCells(status, humanReview) }, reasons });
   }

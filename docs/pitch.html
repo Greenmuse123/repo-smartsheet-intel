@@ -281,7 +281,7 @@
     <div class="kicker">
       <span class="tag">Engineering demo</span>
       <span class="tag">Repository &rarr; Smartsheet</span>
-      <span class="tag">49 tests green</span>
+      <span class="tag">58 tests green</span>
     </div>
     <h1>Your repo already wrote the status report. <span class="hl">It just never told the PM.</span></h1>
     <p class="lede">A command-line tool that reads an existing codebase, turns the project information already hiding inside it into clean Smartsheet rows, and keeps them current, without inventing a single fact.</p>
@@ -297,13 +297,13 @@
     <div class="promises">
       <div class="promise">
         <div class="n">PROMISE 01</div>
-        <h3>Never invents a fact</h3>
-        <p>Owners, priorities and dates are filled only when the code literally states them. Everything else stays blank on purpose. A guard refuses to sync fabricated data.</p>
+        <h3>Only writes what the code says</h3>
+        <p>Owners, priorities and dates are filled only when the code literally states them. Everything else stays blank on purpose, and a guard refuses to sync fabricated data. One deliberate exception, stated plainly: a TODO that is still in the code is recorded as <span class="mono">Not Started</span>, because the comment describing the work still exists. That is a documented rule rather than a fact read from the file.</p>
       </div>
       <div class="promise">
         <div class="n">PROMISE 02</div>
         <h3>Every row is traceable</h3>
-        <p>Each row carries the exact <span class="mono">file:line</span> and evidence type it came from, plus a confidence level, so a human can verify it in seconds.</p>
+        <p>Each row carries the file it came from - and the line, wherever the evidence has one - plus the evidence type and a confidence level, so a human can verify it in seconds. Repository-wide checks such as &ldquo;no lockfile&rdquo; cite <span class="mono">(repository)</span>, because they are about the repo as a whole rather than one line.</p>
       </div>
       <div class="promise">
         <div class="n">PROMISE 03</div>
@@ -315,7 +315,7 @@
     <div class="stats">
       <div class="stat"><div class="v">23</div><div class="l">items found in the demo repo</div></div>
       <div class="stat"><div class="v">9</div><div class="l">evidence extractors</div></div>
-      <div class="stat"><div class="v">49</div><div class="l">automated tests passing</div></div>
+      <div class="stat"><div class="v">58</div><div class="l">automated tests passing</div></div>
       <div class="stat"><div class="v">0</div><div class="l">rows deleted, ever</div></div>
     </div>
   </div>
@@ -510,7 +510,7 @@
   <div class="wrap">
     <p class="eyebrow">How it works</p>
     <h2 class="sec">Deterministic code does the reading. The optional AI only ever suggests.</h2>
-    <p class="sub">Nine small, independently tested extractors do the parsing &mdash; no language model in the path that produces facts. An optional Claude pass (off by default) writes plain-language summaries into the AI Suggestion column and nothing else.</p>
+    <p class="sub">Nine small, independently tested extractors do the parsing &mdash; no language model in the path that produces facts. An optional Claude pass (off by default) writes plain-language summaries into the AI Suggestion column, and may fill an empty Description with a clearly labelled summary. It never writes to a fact column such as Owner, Status, Priority or Source.</p>
     <div class="pipe">
       <div class="stage"><div class="s-n">STAGE 01</div><h4>Scan</h4><p>Walk the repo read-only. Skip vendor dirs and binaries. Withhold anything that looks like a secret before any other rule.</p></div>
       <div class="stage"><div class="s-n">STAGE 02</div><h4>Extract</h4><p>Nine parsers turn comments, checklists, changelogs, manifests, CI, tests, CODEOWNERS and ADRs into verbatim evidence.</p></div>
@@ -618,7 +618,7 @@ Final sheet: 23 rows, 0 deleted.</div>
           <li>CSV fallback for teams without API access</li>
           <li>Dry-run mode that writes nothing</li>
           <li>Secret filtering and read-only guarantee</li>
-          <li>49 automated tests passing; typecheck clean</li>
+          <li>58 automated tests passing; typecheck clean</li>
           <li>ELI5 guide, technical docs, data mapping, demo script</li>
         </ul>
       </div>
@@ -638,7 +638,7 @@ Final sheet: 23 rows, 0 deleted.</div>
       <p style="margin:0 0 16px"><a class="cta-demo" href="/demo/" style="font-size:15px;padding:11px 18px">Or open the interactive demo &rarr;</a></p>
       <pre><span class="cm"># from the app/ folder</span>
 npm install
-npm test                 <span class="cm"># 49 passing</span>
+npm test                 <span class="cm"># 58 passing</span>
 npx rsi <span class="ac">demo</span>            <span class="cm"># the full storyline, no account needed</span>
 
 <span class="cm"># when you have a Smartsheet token in .env:</span>
@@ -652,7 +652,7 @@ npx rsi <span class="ac">sync</span></pre>
 <footer>
   <div class="wrap fl">
     <span>Repo &rarr; Smartsheet Project Intelligence</span>
-    <span>TypeScript &middot; Node &middot; 49 tests &middot; built for the Smartsheet workflow</span>
+    <span>TypeScript &middot; Node &middot; 58 tests &middot; built for the Smartsheet workflow</span>
   </div>
 </footer>
 

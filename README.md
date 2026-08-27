@@ -6,36 +6,14 @@ Turns an existing software repository into an accurate, traceable, human-reviewa
 Repository → Scanner → Extractors → Normalized Project Model → Validation / Confidence → Sync Engine → Smartsheet
 ```
 
-**Three promises:** it never invents a fact, every row says where it came from, and it never overwrites a decision a person made in the sheet.
-
----
-
-## Try it in 30 seconds (no Smartsheet account, no API token, no config)
-
-```bash
-npm install
-npm test              # 49 tests
-npm run demo:report   # analyses the bundled sample repo "Orderly"
-npm run demo:walkthrough   # the whole sync story against an in-memory sheet
-```
-
-`demo:walkthrough` runs the real analyzer and the real sync engine - only the Smartsheet transport
-is swapped for an in-memory sheet. Nothing is sent anywhere. It prints the five-step story:
-
-```
-23 created  ->  re-run changes nothing  ->  a README checkbox is ticked, one row updates
-            ->  a PM sets that row to Blocked and the repo disagrees: the human value wins,
-                the repo value moves to Repo Status, the row is flagged Conflict
-            ->  a FIXME is deleted: the row is KEPT and flagged "Missing in Repo", never deleted
-
-Final sheet: 23 rows, 5 flagged for human review, 0 rows deleted.
-```
-
-It edits two files in the sample repo and restores them, leaving the working tree clean.
+**Three promises, stated precisely:**
+1. **It does not copy a value into a fact column unless the repository literally states it.** Owner, priority, dates and milestones stay blank otherwise. The one deliberate inference is `Status`: a TODO that is still present is recorded as `Not Started`, because the comment describing the work still exists. That is a documented rule, not a fact read out of the file, and it is the only place the tool asserts something the repository did not say.
+2. **Every row carries its provenance** - the file, and the line where evidence has one. Repository-wide heuristics (for example "package.json has no lockfile") cite `(repository)` because they are about the repo as a whole, not a line.
+3. **It never overwrites a decision a person made in the sheet.** Human-controlled columns are written on create only; a disagreement over `Status` is surfaced as a Conflict with the human's value kept.
 
 - Works with **or without** Smartsheet API access (CSV fallback).
 - `sync --dry-run` shows every change before anything is written.
-- 49 automated tests cover extraction, no-fabrication, deduplication, updates, protected human fields, invalid credentials, rate-limit retries, and dry-run safety.
+- 58 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, invalid credentials, plan-restriction errors, rate-limit retries, and dry-run safety.
 
 ---
 
@@ -53,7 +31,7 @@ It organizes **copies** of those notes and puts them into Smartsheet, one row pe
 
 Smartsheet becomes our easy-to-read checklist.
 
-When something changes in the toy box, the program can check again and update the checklist. It updates the same row, so you never get two rows for one note.
+When something changes in the toy box, the program can check again and update the checklist. It updates the same row, matched on a stable Item ID, so a repeated run does not add a second row for the same note. (Run one sync at a time: two syncs racing against the same sheet can both decide a row is missing and each create it. There is no cross-process lock.)
 
 If the computer isn't sure about something, it asks a human instead of guessing. It ticks a box called **Human Review** and writes its guess in a column called **AI Suggestion**, never in the "facts" columns.
 
@@ -79,7 +57,7 @@ Run step 4 (or 5) again whenever the code changes.
 | Owner | Who looks after it. Filled once from the code's ownership file if there is one; after that it is yours. |
 | Component | Which part of the project it belongs to. |
 | Description | The note with a little context. |
-| Source | The exact file and line, so anyone can go and look. |
+| Source | The file, and the line where the evidence has one, so anyone can go and look. Repository-wide heuristics cite `(repository)`. |
 | Dependency / Milestone / Due Date | Yours. The program never invents these. |
 | Last Repo Update | When that part of the code last changed. |
 | Confidence | High = written plainly in the code. Medium = pieced together from clues. Low = a suggestion. |
@@ -153,7 +131,7 @@ app/
     adapters/csv.ts          CSV + column-definitions fallback
     report/report.ts         Repository Intelligence Report
     log/logger.ts            plain-language logging
-  tests/                     vitest suites (49 tests)
+  tests/                     vitest suites (58 tests)
   examples/sample-repo/      "Orderly" demo repository + sample-repo.project-config.yaml
   docs/                      DATA-MAPPING.md · smartsheet-import.md · DEMO.md
 ```
@@ -163,7 +141,7 @@ app/
 ```
 cd app
 npm install
-npm test          # 49 tests
+npm test          # 58 tests
 npm run typecheck
 ```
 
@@ -171,7 +149,7 @@ Node ≥ 20. Runtime dependencies: `commander`, `yaml`. Optional: `@anthropic-ai
 
 ## Configuration (`project-config.yaml`)
 
-Created by `rsi init`. Every key has a default; only `project.name` and `project.repository` are required.
+Created by `rsi init`. Every key has a default, including `project.name` (`My Project`) and `project.repository` (`.`), so a config that omits them still loads - set both to something meaningful rather than relying on the defaults.
 
 ```yaml
 project:
@@ -227,7 +205,7 @@ ANTHROPIC_API_KEY=         # only if ai.enabled
 
 ## Data model
 
-See `src/model/types.ts`. `RawEvidence` (immutable, verbatim) is kept inside `ProjectItem.evidence`; interpretation lives in `aiSuggestion`. Item ID = `RSI-<extractor code>-<sha1(path | normalized text)[0:8]>`, stable across line moves. Fingerprint = sha1 over repo-controlled fields **excluding the line number**, so a file gaining a line at the top does not mark everything beneath it as Updated. Full column mapping: `docs/DATA-MAPPING.md`.
+See `src/model/types.ts`. `RawEvidence` is kept inside `ProjectItem.evidence`. It is the closest quotation of the source the tool can safely publish, not a byte-for-byte copy: whitespace is collapsed, it is clipped to 400 characters, and every free-text field (`excerpt`, `section`, `path`, `sourceType`, `refs`) is passed through the redactor before it can reach a sheet cell, the CSV, a log line or the optional AI payload; interpretation lives in `aiSuggestion`. Item ID = `RSI-<extractor code>-<sha1(path | normalized text)[0:8]>`, stable across line moves. Fingerprint = sha1 over repo-controlled fields **excluding the line number**, so a file gaining a line at the top does not mark everything beneath it as Updated. Full column mapping: `docs/DATA-MAPPING.md`.
 
 ## Sync strategy
 
@@ -251,7 +229,7 @@ Rows are never deleted. Vanished items → `Missing in Repo` + Human Review, fla
 
 ## API integration
 
-`src/adapters/smartsheet/client.ts`: `fetch`-based, base `https://api.smartsheet.com/2.0`, Bearer auth. Retries 429 (errorCode 4003), 5xx and network errors with exponential backoff (2s·2ⁿ, honours `Retry-After`, max 5 tries). Writes to one sheet never overlap. Cell text is truncated at 3900 chars with a visible marker (Smartsheet silently truncates at 4000). `setup-sheet` creates the sheet via `POST /sheets` with one primary column and picklist options from `schema.ts`.
+`src/adapters/smartsheet/client.ts`: `fetch`-based, base `https://api.smartsheet.com/2.0`, Bearer auth. Retries 429 (errorCode 4003), 5xx and network errors with exponential backoff (2s·2ⁿ, honours `Retry-After`, up to 5 retries, so at most 6 attempts in total). Writes to one sheet never overlap. Cell text is truncated at 3900 chars with a visible marker (Smartsheet silently truncates at 4000). `setup-sheet` creates the sheet via `POST /sheets` with one primary column and picklist options from `schema.ts`.
 
 ## Error handling
 
@@ -319,83 +297,4 @@ The computer reads the sticky notes inside the toy box, copies them neatly onto 
 - **State management:** local `state.json` is a cache; `Item ID` + `Repo Fingerprint` + `Repo Status` in the sheet are sufficient to rebuild it (tested).
 - **Security:** sensitive-path gate before ignore rules, regex redaction at the excerpt boundary, env-only credentials, no repo writes.
 - **Conflict handling:** human-controlled columns written on create only; shared columns merged; conflicts keep the human value and flag.
-- **Testing:** 49 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.
-
----
-
-# Run against a real Smartsheet (2026-08-26)
-
-The tool was exercised end to end against a live Smartsheet account. Three things came out of that
-which are worth stating plainly, because two of them are defects this project found in itself.
-
-## 1. The REST API is paywalled, and the trial does not open it
-
-Verified by clicking it, not by reading marketing:
-
-| Plan | API access |
-|---|---|
-| Free | No |
-| **30-day Business trial** | **No** - "Generate new access token" opens an *"Upgrade for Smartsheet API"* modal |
-| Business and above | Yes (3-member minimum) |
-
-So `setup-sheet` / `sync` remain real, tested code against the documented API, exercised only through
-a fake `fetch` and an in-memory sheet target. That limitation is stated here rather than hidden.
-
-## 2. Defect found: the CSV export was unreadable by Smartsheet
-
-`csvFor()` emitted UTF-8 **with no byte-order mark**. Smartsheet sniffs the encoding and rejects a
-BOM-less file with *"Failed to upload file"* the moment it contains any multibyte character - which
-the bundled sample does, via the truncator's own `…`.
-
-Isolated by single-variable testing: the byte-identical failing file **plus a BOM** imports fine.
-
-Both intuitive suspects were wrong, and both are worth noting:
-
-- **CRLF was not the cause.** RFC 4180 mandates it and the fixed file keeps it.
-- **ASCII-folding is the wrong fix.** It would silently distort non-English repository text, which
-  violates the project's central rule. A version that folded characters *worked*, and would have
-  shipped a data-corrupting bug behind a green test suite.
-
-Fixed in `csvFor()` (one line, plus a regression test asserting BOM position, CRLF retention and
-`U+2026` round-tripping). Scope is precise: `csvFor()` renders booleans as `Yes`/`No`
-(`src/adapters/csv.ts`), whereas the API path sends a real JSON boolean
-(`src/adapters/smartsheet/mapper.ts`) - so `rsi sync` produces genuine checkboxes and the CSV path
-cannot. That is a concrete, evidenced reason to prefer the API path.
-
-## 3. Defect found: this project's own documentation contained a false claim
-
-`docs/smartsheet-import.md` asserted that converting `Human Review` to a Checkbox column converts
-imported `"Yes"`/`"No"` text to checked/unchecked. **It does not.** Measured on the live sheet:
-
-| Formula | Result |
-|---|---|
-| `COUNTIF([Human Review]:[Human Review], true)` | 0 |
-| `COUNTIF([Human Review]:[Human Review], 1)` | 0 |
-| `COUNTIF([Human Review]:[Human Review], "Yes")` | **3** (correct) |
-
-The column type changes only the display; the cells keep the literal strings. The Summary-field
-recipe in that same doc used the broken formula and would have reported **0 items needing review**
-on a tool whose entire premise is never stating anything it cannot back up. Both corrected.
-
-## What was built on the live sheet
-
-23 rows / 22 typed columns imported, then the surrounding Smartsheet toolset built by hand:
-
-| Feature | Detail |
-|---|---|
-| Sheet Summary | 4 formulas - Open **10**, Blocked **0**, Needs review **3**, Sync conflicts **0** |
-| Conditional formatting | `Confidence = Low` → amber row |
-| Saved filter (**shared**) | `Confidence = Low` OR `Status = Blocked` OR `Sync Status ∈ (Conflict, Missing in Repo)` → 3 of 23 |
-| Report | grouped by `Type`, 8 columns |
-| Dashboard | Metric widget bound to **Sheet Summary data** |
-| Automation | rows flagged Conflict/Missing → alert **contacts in the `Owner` cell** |
-| Automation | `Owner is Blank` → weekly **Update Request** |
-
-Two of those are the point of the whole design:
-
-- The alert recipient picker offers **only `Owner`**, because `Owner` is a `CONTACT_LIST` column. A
-  text column cannot be an alert recipient - column type is a design decision, not formatting.
-- `Owner is Blank` matches **exactly 7 of 23** rows, matching the generated report's own line
-  *"Owners: 7 of 23 items have no literal owner evidence and are left blank."* The tool refuses to
-  guess an owner, so Smartsheet asks a human every week until one is supplied. The refusal to
-  fabricate becomes a workflow rather than a gap.
+- **Testing:** 58 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.

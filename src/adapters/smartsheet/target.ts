@@ -3,8 +3,15 @@
  * drops values for columns that do not exist in the sheet (logged once).
  */
 import type { SheetTarget, TargetRow, CellValues } from '../../sync/target.js';
-import { SmartsheetClient, type Sheet } from './client.js';
+import { SmartsheetClient, SmartsheetError, type Sheet } from './client.js';
+import { COLUMNS } from './schema.js';
 import { log } from '../../log/logger.js';
+
+/** Columns Smartsheet parses as contacts. Handles like `@team-b` are not valid emails. */
+const CONTACT_COLUMNS = new Set(COLUMNS.filter((c) => c.type === 'CONTACT_LIST').map((c) => c.title));
+
+/** Without these the sheet has no stable identity and every run would re-create every row. */
+const REQUIRED_COLUMNS = ['Item ID', 'Repo Fingerprint', 'Sync Status'];
 
 export class SmartsheetTarget implements SheetTarget {
   readonly sheetId: string;
@@ -21,6 +28,18 @@ export class SmartsheetTarget implements SheetTarget {
     this.byTitle.clear(); this.byId.clear();
     for (const c of sheet.columns) { this.byTitle.set(c.title, c.id); this.byId.set(c.id, c.title); }
     this.columnTitles = sheet.columns.map((c) => c.title);
+
+    // Identity columns are not optional. If `Item ID` is absent or renamed, creates would
+    // omit the identity key and every subsequent run would add the same rows again - the
+    // opposite of the idempotency this tool promises. Fail loudly instead.
+    const missing = REQUIRED_COLUMNS.filter((t) => !this.byTitle.has(t));
+    if (missing.length) {
+      throw new SmartsheetError(
+        `Sheet ${this.sheetId} is missing required column(s): ${missing.join(', ')}.`,
+        400, undefined,
+        'These columns carry row identity. Run `rsi setup-sheet` to create a sheet with the full schema, or add the columns with exactly these titles before syncing.',
+      );
+    }
   }
 
   async readRows(): Promise<TargetRow[]> {
@@ -33,8 +52,8 @@ export class SmartsheetTarget implements SheetTarget {
     });
   }
 
-  private toCells(values: CellValues): Array<{ columnId: number; value: string | number | boolean }> {
-    const out: Array<{ columnId: number; value: string | number | boolean }> = [];
+  private toCells(values: CellValues): Array<{ columnId: number; value: string | number | boolean; strict?: boolean }> {
+    const out: Array<{ columnId: number; value: string | number | boolean; strict?: boolean }> = [];
     for (const [title, v] of Object.entries(values)) {
       const id = this.byTitle.get(title);
       if (id === undefined) {
@@ -42,6 +61,12 @@ export class SmartsheetTarget implements SheetTarget {
         continue;
       }
       if (v === null || v === undefined) continue; // Smartsheet clears cells with value "" - we never blank a cell implicitly
+      // CONTACT_LIST cells are parsed strictly by default: anything that is not a valid
+      // email is rejected, and with allowPartialSuccess=false one bad value fails the whole
+      // batch. Owner is seeded from CODEOWNERS handles (@team-b) and TODO names (alice),
+      // which are deliberately NOT email addresses, so those cells must opt out of strict
+      // parsing and be stored as display values.
+      if (CONTACT_COLUMNS.has(title)) { out.push({ columnId: id, value: v, strict: false }); continue; }
       out.push({ columnId: id, value: v });
     }
     return out;

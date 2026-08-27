@@ -104,6 +104,63 @@ describe('missing items', () => {
   });
 });
 
+describe('lifecycle after the happy path', () => {
+  it('clears "Missing in Repo" when the item reappears unchanged (regression)', async () => {
+    // Regression: fingerprint equality returned "unchanged" before the missing marker was
+    // cleared, so a file that came back stayed flagged as missing forever.
+    const a = ev('src/a.js', 'one'), b = ev('src/b.js', 'two');
+    await run(items(a, b), T1);
+    await run(items(a), T2);                       // b vanishes -> flagged
+    const bId = items(b)[0].itemId;
+    const gone = target.rows.find((r) => r.cells['Item ID'] === bId)!;
+    expect(gone.cells['Sync Status']).toBe('Missing in Repo');
+
+    const p = await run(items(a, b), T3);          // b comes back, byte-identical
+    expect(p.counts.unchanged).toBeLessThan(2);
+    const back = target.rows.find((r) => r.cells['Item ID'] === bId)!;
+    expect(back.cells['Sync Status']).not.toBe('Missing in Repo');
+    expect(back.cells['Sync Status']).toBe('Synced');
+    expect(target.rows).toHaveLength(2);           // still never deleted or duplicated
+  });
+
+  it('keeps an unresolved conflict when a later, unrelated repo change lands (regression)', async () => {
+    // Regression: alreadyConflict only appended a reason, so any later fingerprint change
+    // silently downgraded Conflict to Updated while the two sides still disagreed.
+    // Item ID is sha1(path|text), so the text must stay fixed to keep the SAME row; the
+    // checked state moves Status and the section moves the fingerprint.
+    const check = (state: 'x' | ' ', section = 'Roadmap') => ({
+      extractor: 'readme-checklist',
+      sourceType: state === 'x' ? 'Markdown checklist (checked)' : 'Markdown checklist (unchecked)',
+      path: 'README.md', line: 5, section, excerpt: 'ship it',
+    } as RawEvidence);
+
+    await run(normalize([check(' ')]), T1);                 // repo: Not Started
+    target.rows[0].cells['Status'] = 'Blocked';             // human decides Blocked
+    const p2 = await run(normalize([check('x')]), T2);      // repo: Done -> conflict
+    expect(p2.counts.conflict).toBe(1);
+    expect(target.rows[0].cells['Sync Status']).toBe('Conflict');
+
+    // An unrelated repo change (section moves) while the two sides STILL disagree.
+    const p3 = await run(normalize([check('x', 'Known issues')]), T3);
+    expect(target.rows).toHaveLength(1);                    // same row, not a new one
+    expect(target.rows[0].cells['Status']).toBe('Blocked'); // human value still wins
+    expect(target.rows[0].cells['Sync Status']).toBe('Conflict'); // and it is STILL a conflict
+    expect(p3.counts.conflict).toBe(1);
+  });
+
+  it('does not silently collapse two rows that claim the same Item ID', async () => {
+    const a = ev('src/a.js', 'one');
+    await run(items(a), T1);
+    const dup = { rowId: 'dup-1', cells: { ...target.rows[0].cells } };
+    target.rows.push(dup as typeof target.rows[number]);
+    const rows = await target.readRows();
+    const plan = planSync(items(a), rows, state, T2);
+    // Both rows survive; the planner must not treat the sheet as if only one existed.
+    expect(target.rows).toHaveLength(2);
+    expect(plan.changes.filter((c) => c.action === 'create')).toHaveLength(0);
+  });
+});
+
 describe('dry run', () => {
   it('planning alone never writes to the target', async () => {
     const its = items(ev('src/a.js', 'one'));

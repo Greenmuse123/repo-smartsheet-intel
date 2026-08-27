@@ -81,7 +81,9 @@ export class SmartsheetClient {
     let n = 0;
     for (const batch of chunk(rows, batchSize)) {
       const res = await this.serialized(() => this.request<{ result: SheetRow[] | { ids?: number[] } }>('PUT', `/sheets/${sheetId}/rows?allowPartialSuccess=false`, batch));
-      n += Array.isArray(res.result) ? res.result.length : (res.result?.ids?.length ?? batch.length);
+      if (Array.isArray(res.result)) n += res.result.length;
+      else if (Array.isArray(res.result?.ids)) n += res.result.ids.length;
+      else throw new SmartsheetError('Smartsheet returned an unrecognised response to a row update.', 200, undefined, 'The rows may or may not have been written. Re-run `rsi sync --dry-run` to see the current state before syncing again.');
     }
     return n;
   }
@@ -133,7 +135,12 @@ function toFriendly(status: number, code: number | undefined, message?: string):
   if (status === 401 || code === 1002 || code === 1003 || code === 1004) {
     return new SmartsheetError('Smartsheet rejected the access token.', status, code, 'Check SMARTSHEET_ACCESS_TOKEN: it may be missing, expired, or pasted with extra spaces. Generate a new token under Account > Apps & Integrations > API Access.');
   }
-  if (status === 403) return new SmartsheetError('The token is valid but is not allowed to edit this sheet.', status, code, 'Share the sheet with the token owner with Editor access, or use a different sheet.');
+  if (status === 403) {
+    // 1013 is a plan/licence restriction, not a sheet-sharing problem, and it is what a
+    // Free or trial account hits on POST /sheets - where no sheet exists to share yet.
+    if (code === 1013) return new SmartsheetError('Your Smartsheet plan does not allow this operation.', status, code, 'The Smartsheet API requires a Business plan or higher; Free and 30-day trial accounts cannot use it. Use `rsi export-csv` and import the file instead.');
+    return new SmartsheetError('The token is valid but is not allowed to perform this operation.', status, code, 'If you are syncing an existing sheet, share it with the token owner as Editor. If you are creating one, check that your plan and licence allow API sheet creation.');
+  }
   if (status === 404 || code === 1006) return new SmartsheetError('The sheet was not found.', status, code, 'Check SMARTSHEET_SHEET_ID, or run `rsi setup-sheet` to create a fresh sheet.');
   if (status === 429) return new SmartsheetError('Smartsheet rate limit exceeded and retries were exhausted.', status, code, 'Wait a minute and run the sync again; nothing was partially applied within the failing batch.');
   return new SmartsheetError(`Smartsheet returned an error (${status}${code ? `, code ${code}` : ''}): ${message ?? 'no message'}`, status, code, 'Re-run with --verbose for details.');
@@ -144,6 +151,8 @@ async function safeJson(res: Response): Promise<any | undefined> {
 }
 
 export function chunk<T>(arr: T[], size: number): T[][] {
+  // A size of 0 or less would never advance `i` - an infinite loop rather than a bad batch.
+  if (!Number.isInteger(size) || size < 1) throw new RangeError(`chunk size must be a positive integer, received ${size}`);
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;

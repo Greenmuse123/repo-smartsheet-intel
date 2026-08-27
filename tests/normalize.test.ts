@@ -10,6 +10,26 @@ import type { RawEvidence } from '../src/model/types.js';
 
 const todo = (over: Partial<RawEvidence> = {}): RawEvidence => ({ extractor: 'todo-comments', sourceType: 'TODO comment', path: 'src/a.ts', line: 10, excerpt: 'TODO: add retry', ...over });
 
+describe('redaction covers every field that can reach a sheet, a log or the AI payload', () => {
+  it('redacts a secret in TODO metadata, not just in the excerpt (regression: leaked Owner)', () => {
+    // Regression for a real defect: redaction was applied to `excerpt` only, so
+    // TODO(alice@example.com) kept the address in `section` -> `owner` -> the sheet cell,
+    // the CSV and stdout, while the excerpt showed [email] and looked safe.
+    const [it] = normalize([todo({ section: 'owner=alice@example.com', excerpt: 'TODO(alice@example.com): rotate the key' })]);
+    expect(it.owner).not.toContain('alice@example.com');
+    expect(it.owner).toBe('[email]');
+    expect(JSON.stringify(it)).not.toContain('alice@example.com');
+  });
+  it('redacts a credential embedded in a repository path', () => {
+    const [it] = normalize([todo({ path: 'src/ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123/a.ts' })]);
+    expect(JSON.stringify(it)).not.toContain('ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123');
+  });
+  it('redacts issue refs', () => {
+    const [it] = normalize([todo({ refs: ['alice@example.com'] })]);
+    expect(JSON.stringify(it)).not.toContain('alice@example.com');
+  });
+});
+
 describe('no fabrication', () => {
   it('leaves owner, priority, dates and dependency undefined when the repo gives no evidence', () => {
     const [it] = normalize([todo()]);
