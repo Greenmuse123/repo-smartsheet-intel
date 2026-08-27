@@ -1254,34 +1254,29 @@ describe('round-18 review regressions', () => {
     }
   });
 
-  it('does not strand a row written before the Repo Path column existed (R18-02)', async () => {
-    // An older row has no Repo Path at all. Refusing those would leave them permanently
-    // unwritable AND unflagged, because the item's ID is already accounted for.
-    await run(items(ev('src/a.js', 'one')), T1);
-    const row = target.rows[0];
-    delete row.cells['Repo Path'];                         // as an older build left it
+  it('refuses to write to a row that does not say which file it is for (R22-01)', async () => {
+    // `Repo Path` is required, so a blank value means the row predates it - and nothing else on
+    // such a row can be trusted to identify it, because every cell can be typed by hand. The
+    // fingerprint looked like proof and is not: it is public and deterministic, so copying the
+    // right twelve characters onto the wrong row was enough to have this item's path and source
+    // written onto it. Both the unchanged and the changed case are refused now.
+    for (const alsoChanged of [false, true]) {
+      target = new MemoryTarget(COLUMN_TITLES, 'sheet-1');
+      state = { version: 1, sheetId: 'sheet-1', items: {} };
+      await run(items(ev('src/a.js', 'one')), T1);
+      const row = target.rows[0];
+      delete row.cells['Repo Path'];
+      row.cells['Owner'] = 'someone@example.com';
+      const before = { ...row.cells };
 
-    // Unchanged content: the fingerprint still matches, which proves the row is this item.
-    const p = await run(items(ev('src/a.js', 'one')), T2);
-    expect(p.counts.update).toBe(1);
-    expect(row.cells['Repo Path']).toBe('src/a.js');       // and it is filled in
+      const p = await run(items(ev('src/a.js', 'one', alsoChanged ? { commit: 'abc1234' } : {})), T2);
+      expect(p.counts.update, String(alsoChanged)).toBe(0);
+      expect(row.cells['Source Commit'], String(alsoChanged)).toBe(before['Source Commit']);
+      expect(row.cells['Owner'], String(alsoChanged)).toBe('someone@example.com');
+      expect(p.changes[0].reasons.join(' ')).toMatch(/no recorded path/);
+    }
   });
 
-  it('leaves a blank-path row alone when its content also changed (R21-02)', async () => {
-    // With no recorded path AND a fingerprint that no longer matches, nothing on the row proves
-    // it is this item - any twelve hex characters can be typed into a cell. Stalling with an
-    // explanation is the same choice made about matching old rows generally: a person can fix
-    // it in a minute, and a wrong write cannot be undone.
-    await run(items(ev('src/a.js', 'one')), T1);
-    const row = target.rows[0];
-    delete row.cells['Repo Path'];
-    const before = { ...row.cells };
-
-    const p = await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
-    expect(p.counts.update).toBe(0);
-    expect(row.cells['Source Commit']).toBe(before['Source Commit']);
-    expect(p.changes[0].reasons.join(' ')).toMatch(/nothing on it proves/);
-  });
 });
 
 describe('round-19 review regressions', () => {
@@ -1312,12 +1307,10 @@ describe('round-19 review regressions', () => {
     const row = target.rows[0];
     const baseline = row.cells['Repo Status'];
     const fingerprint = row.cells['Repo Fingerprint'];
-    delete row.cells['Repo Path'];
-    row.cells['Source'] = 'stale text';
+    row.cells['Source'] = 'stale text';                     // Source is not in the fingerprint
 
     const p = await run(items(ev('src/a.js', 'one')), T2);
-    expect(Object.keys(p.changes[0].cells).sort()).toEqual(['Last Synced', 'Repo Path', 'Source']);
-    expect(row.cells['Repo Path']).toBe('src/a.js');
+    expect(Object.keys(p.changes[0].cells).sort()).toEqual(['Last Synced', 'Source']);
     expect(row.cells['Source']).toMatch(/^src\/a\.js:/);
     expect(row.cells['Repo Status']).toBe(baseline);       // baselines untouched
     expect(row.cells['Repo Fingerprint']).toBe(fingerprint);
@@ -1459,5 +1452,51 @@ describe('round-21 review regressions', () => {
     expect(p.counts.update).toBe(0);
     expect(row.cells['Item']).toBe(before['Item']);
     expect(row.cells['Owner']).toBe('owner-of-other@example.com');
+  });
+});
+
+describe('round-22 review regressions', () => {
+  const risk = (over: Partial<RawEvidence> = {}): RawEvidence => ({
+    extractor: 'risk-heuristics', sourceType: 'Risk heuristic', path: 'src/auth/session.js',
+    line: 5, excerpt: 'FIXME in a security-sensitive file: sessions never expire', ...over,
+  });
+
+  it('keeps a human tick through the tick-clear-lose-state-tick sequence (R22-02)', async () => {
+    // The case that survived five rounds of documentation. A checkbox can say what the value is
+    // but never who chose it, so once the local cache was gone the sheet could not tell "tool
+    // ticked it and it is still there" from "tool ticked it, a person cleared it, and a person
+    // ticked it again" - and the next repository change cleared their decision.
+    await run(normalize([risk()]), T1);
+    const row = target.rows[0];
+    expect(row.cells['Human Review']).toBe(true);
+    expect(row.cells['Review Owner']).toBe('tool');        // ours, and the sheet says so
+
+    row.cells['Human Review'] = false;                     // a person clears it
+    await run(normalize([risk({ commit: 'aaa1111' })]), T2);
+    expect(row.cells['Review Owner']).toBe('human');       // and that is written down
+
+    state = { version: 1, sheetId: 'sheet-1', items: {} }; // the local cache is lost
+    row.cells['Human Review'] = true;                      // and they tick it again themselves
+
+    for (const commit of ['bbb2222', 'ccc3333']) {
+      await run(normalize([risk({ commit })]), T3);
+      expect(row.cells['Human Review'], commit).toBe(true);
+    }
+  });
+
+  it('hands the checkbox over on the sheet when it raises something (R22-02)', async () => {
+    await run(items(ev('src/a.js', 'one')), T1);
+    const row = target.rows[0];
+    row.cells['Repo Status'] = 'Done';                     // stale mirror
+    row.cells['Status'] = 'In Progress';                   // and somebody disagrees
+
+    await run(items(ev('src/a.js', 'one')), T2);
+    expect(row.cells['Human Review']).toBe(true);
+    expect(row.cells['Review Owner']).toBe('human');       // theirs from now on
+
+    state = { version: 1, sheetId: 'sheet-1', items: {} }; // even with no local record
+    row.cells['Human Review'] = false;                     // they dismiss it
+    await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T3);
+    expect(row.cells['Human Review']).toBe(false);
   });
 });

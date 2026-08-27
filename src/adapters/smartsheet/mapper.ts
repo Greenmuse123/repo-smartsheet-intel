@@ -63,5 +63,10 @@ export function sharedCells(status: Status): CellValues {
  * writing `Repo Review` over a person's tick relabels their decision as ours.
  */
 export function reviewCells(humanReview: boolean): CellValues {
-  return { 'Human Review': humanReview, 'Repo Review': humanReview };
+  return { 'Human Review': humanReview, 'Repo Review': humanReview, 'Review Owner': 'tool' };
+}
+
+/** Records that the person owns the checkbox from now on, without touching the checkbox. */
+export function handReviewToHuman(): CellValues {
+  return { 'Review Owner': 'human' };
 }

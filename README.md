@@ -19,7 +19,7 @@ Repository → Scanner → Extractors → Normalized Project Model → Validatio
 
 - Works with **or without** Smartsheet API access (CSV fallback).
 - `sync --dry-run` shows every change before anything is written.
-- 137 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, the required-column guard on the real Smartsheet target, invalid credentials, authorization vs. token errors, plan-restriction errors, rate-limit retries, and dry-run safety. They run against a fake `fetch`; no test performs a live API call.
+- 138 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, the required-column guard on the real Smartsheet target, invalid credentials, authorization vs. token errors, plan-restriction errors, rate-limit retries, and dry-run safety. They run against a fake `fetch`; no test performs a live API call.
 
 ---
 
@@ -72,7 +72,7 @@ Run step 4 (or 5) again whenever the code changes.
 | AI Suggestion | The program's guesses and notes. Never treated as fact. |
 | Management Notes | Your free-text space. The program never touches it. |
 
-The columns to the right of Sync Status are technical (Repo Status, Repo Path, Repo Review, Source Commit, Last Synced, Repo Fingerprint). Hide them if you like; the program needs them to stay honest.
+The columns to the right of Sync Status are technical (Repo Status, Repo Path, Repo Review, Review Owner, Source Commit, Last Synced, Repo Fingerprint). Hide them if you like; the program needs them to stay honest.
 
 ### What happens when something changes?
 
@@ -139,7 +139,7 @@ app/
     adapters/csv.ts          CSV + column-definitions fallback
     report/report.ts         Repository Intelligence Report
     log/logger.ts            plain-language logging
-  tests/                     vitest suites (137 tests)
+  tests/                     vitest suites (138 tests)
   examples/sample-repo/      "Orderly" demo repository + sample-repo.project-config.yaml
   docs/                      DATA-MAPPING.md · smartsheet-import.md · DEMO.md
 ```
@@ -149,7 +149,7 @@ app/
 ```
 cd app
 npm install
-npm test          # 137 tests
+npm test          # 138 tests
 npm run typecheck
 ```
 
@@ -315,11 +315,10 @@ The computer reads the sticky notes inside the toy box, copies them neatly onto 
   then on it never writes that checkbox again, whether you leave it or clear it. A warning you
   can dismiss for good is worth more than one that keeps coming back, and the cost is that this
   row will not be flagged automatically again.
-- **If you lose `state.json`, one ownership case cannot be reconstructed:** the sheet records
-  the last value this tool wrote to `Human Review`, but not who changed it last. So if the tool
-  ticked a row, you cleared it, the state file was then lost, and you later tick it again by
-  hand, the next repository change can read that tick as the tool's own and clear it. Keeping
-  the state file (it lives in `.repo-smartsheet/`) avoids this entirely.
+- **A row written before the `Repo Path` column existed is left alone until you fix it:** such a
+  row does not say which file it is for, and nothing else on it can be trusted to say so - every
+  cell can be typed by hand, and the fingerprint is public and deterministic. The tool refuses to
+  write to it and names it in the plan; adding the path once, or deleting the row, puts it right.
 - **One thing the tool will not do:** if a row has no record of what this tool last wrote to
   `Human Review` - no `Repo Review` value and no local cache, which happens on rows imported by
   hand or created before that column existed - it can never tell its own tick from a person's.
@@ -340,7 +339,7 @@ The computer reads the sticky notes inside the toy box, copies them neatly onto 
   Owner and Management Notes onto the wrong work and cannot be undone; a `Missing in Repo`
   flag costs a few minutes and loses nothing. Run `sync --dry-run` first to see the list.
 
-- **State management:** local `state.json` is a cache; `Item ID` + `Repo Fingerprint` + `Repo Status` + `Repo Review` + `Repo Path` in the sheet are sufficient to rebuild it (tested). Those five plus `Sync Status` are enforced as required columns: `SmartsheetTarget` refuses to sync a sheet missing any of them rather than silently mislabelling edits.
+- **State management:** local `state.json` is a cache; `Item ID` + `Repo Fingerprint` + `Repo Status` + `Repo Review` + `Repo Path` + `Review Owner` in the sheet are sufficient to rebuild it (tested). Those six plus `Sync Status` are enforced as required columns: `SmartsheetTarget` refuses to sync a sheet missing any of them rather than silently mislabelling edits.
 - **Security:** sensitive-path gate before ignore rules, regex redaction at the excerpt boundary, env-only credentials, no repo writes.
 - **Conflict handling:** human-controlled columns written on create only; shared columns merged; conflicts keep the human value and flag.
-- **Testing:** 137 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.
+- **Testing:** 138 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.

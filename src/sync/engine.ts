@@ -10,7 +10,7 @@
  * Use:  `const plan = planSync(items, rows, state, now)`; `await applyPlan(plan, target, state, now)`.
  */
 import type { PlannedChange, ProjectItem, Status, SyncPlan, SyncStatus } from '../model/types.js';
-import { humanSeedCells, repoCells, reviewCells, sharedCells, trunc } from '../adapters/smartsheet/mapper.js';
+import { handReviewToHuman, humanSeedCells, repoCells, reviewCells, sharedCells, trunc } from '../adapters/smartsheet/mapper.js';
 import type { SheetTarget, TargetRow, CellValues } from './target.js';
 import type { SyncState } from './state.js';
 import { log } from '../log/logger.js';
@@ -34,13 +34,19 @@ import { log } from '../log/logger.js';
  * - Otherwise: the box is ours to recompute only if the sheet still agrees with the baseline.
  *   If it differs, a person moved it - in EITHER direction - and it is theirs from then on.
  */
-function reviewRule(sheetReview: boolean, cache: boolean | undefined, mirror: boolean | undefined): {
+function reviewRule(sheetReview: boolean, cache: boolean | undefined, mirror: boolean | undefined, owner: string): {
   baseline: boolean | undefined;
   humanOwns: boolean;
   /** True when the two records of OUR value disagree and the mirror is being re-pointed. */
   drift: boolean;
   write: (want: boolean) => CellValues;
 } {
+  // `Review Owner` is the durable answer, and it outranks every inference below. A checkbox can
+  // say what the value is but never who chose it, which is why a person's later tick used to be
+  // mistaken for the tool's own once the local cache was gone.
+  if (owner === 'human') {
+    return { baseline: undefined, humanOwns: true, drift: false, write: () => ({}) };
+  }
   const baselines = [cache, mirror].filter((b): b is boolean => b !== undefined);
   if (baselines.length === 0) {
     // We have no record of ever writing this cell, so we cannot claim its value - and we must
@@ -58,7 +64,10 @@ function reviewRule(sheetReview: boolean, cache: boolean | undefined, mirror: bo
   }
   const baseline = baselines[0];
   const humanOwns = sheetReview !== baseline;
-  return { baseline, humanOwns, drift: false, write: (want) => (humanOwns ? {} : reviewCells(want)) };
+  // When the inference says a person moved it, WRITE that down. Otherwise the conclusion has to
+  // be re-derived on every future run from values that cannot express it, and one lost cache
+  // turns their decision back into ours.
+  return { baseline, humanOwns, drift: false, write: (want) => (humanOwns ? handReviewToHuman() : reviewCells(want)) };
 }
 
 export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncState, now: string): SyncPlan {
@@ -113,23 +122,23 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // of parsing tells the two apart: `src/a.ts - evil.ts` is a real file whose Source begins
     // exactly like `src/a.ts`.
     //
-    // The column is required, so a sheet without it is refused before we ever get here. A blank
-    // VALUE means "written by a build older than the column" - and the only way to believe that
-    // of THIS item is a fingerprint that matches what this item computes to right now. A
-    // well-formed fingerprint is not enough: any twelve hex characters can be typed into a cell,
-    // and the one thing that cannot be guessed is the item's own content.
+    // A row must say which file it is for before anything is written to it. `Repo Path` is a
+    // required column, so a blank value means the row predates it - and there is no way to
+    // check such a row is really this item, because every other cell on it can be typed by
+    // hand. A fingerprint looked like proof and is not: it is public, deterministic, and
+    // copying the right twelve characters onto the wrong row was enough to have this item's
+    // path and source written onto it.
     //
-    // The cost is deliberate. If such a row's content also changed since the last sync there is
-    // no proof left, and the row is left alone with an explanation rather than written over -
-    // the same choice made about matching old rows generally.
+    // So a blank path is refused outright. That is a stall, not a loss: the row keeps
+    // everything on it, the plan names it, and adding the path (or deleting the row) once puts
+    // it right. Writing to a row we cannot identify is the thing that cannot be undone.
     const rowPath = String(row?.cells['Repo Path'] ?? '');
-    const rowIsOurs = String(row?.cells['Repo Fingerprint'] ?? '') === item.fingerprint;
-    if (row && (rowPath === '' ? !rowIsOurs : rowPath !== item.repositoryPath)) {
+    if (row && rowPath !== item.repositoryPath) {
       // The row carries this Item ID but points at a different file. Identity always includes
       // the path, so this cannot be the same item: the ID was hand-edited, or two identities
       // collided. Either way, writing this item's content over that row would destroy whatever
       // it actually describes, along with the Owner and Notes somebody put on it.
-      changes.push({ action: 'unchanged', item, cells: {}, reasons: [`skipped: the sheet row using Item ID ${item.itemId} is for a different file (${rowPath || 'no recorded path, and nothing on it proves this tool wrote it for this item'}), so it is not this item. Fix or remove that row and re-run.`] });
+      changes.push({ action: 'unchanged', item, cells: {}, reasons: [`skipped: the sheet row using Item ID ${item.itemId} ${rowPath ? `is for a different file (${rowPath})` : 'has no recorded path, so it cannot be confirmed to be this item'}, so it is not this item. Fix or remove that row and re-run.`] });
       continue;
     }
     if (!row) {
@@ -208,13 +217,15 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // The cost is that this tool cannot flag that row again by itself, which is the same trade
     // made for rows with no baseline at all: a stale flag costs a glance, an unwanted one that
     // keeps coming back costs trust.
-    const raiseOutstanding = stForReview?.reviewRaisedForHuman === true;
+    const raiseOutstanding = stForReview?.reviewRaisedForHuman === true
+      || String(row.cells['Review Owner'] ?? '') === 'human';
     const rule = raiseOutstanding
       ? { baseline: undefined as boolean | undefined, humanOwns: true, drift: false, write: () => ({}) }
       : reviewRule(
       sheetReview,
       stForReview?.lastWrittenHumanReview,
       typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
+      String(row.cells['Review Owner'] ?? ''),
     );
     const humanOwnsReview = rule.humanOwns;
     const writeReview = rule.write;
@@ -315,7 +326,9 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
             // every ownership rule calls the person's, so their decision still survives. The
             // separate flag is what makes the raise durable while the file exists - one boolean
             // cannot say both what the value is and who set it.
-            ...(somebodyDisagrees ? { 'Human Review': true, 'Repo Review': true } : {}),
+            // Tick it and hand it over in the same write. `Review Owner` is what makes the
+            // hand-over outlive the local cache; the state flag is now only a fast path.
+            ...(somebodyDisagrees ? { 'Human Review': true, 'Repo Review': true, 'Review Owner': 'human' } : {}),
           },
           reviewRaisedForHuman: somebodyDisagrees,
           reasons: somebodyDisagrees
@@ -330,7 +343,6 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       // and a full update here would rewrite the merge baselines, which is how a real conflict
       // got destroyed two rounds ago - so repair exactly those two cells and nothing else.
       const backfill: CellValues = {};
-      if (rowPath !== item.repositoryPath) backfill['Repo Path'] = item.repositoryPath;
       // Compare and write the value a cell can actually hold. Comparing the raw one against a
       // stored, truncated one never matched, so an overlong Source planned the same repair on
       // every single run.
@@ -448,6 +460,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
           row.cells['Human Review'] === true,
           state.items[id]?.lastWrittenHumanReview,
           typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
+          String(row.cells['Review Owner'] ?? ''),
         );
         changes.push({
           action: 'missing',
@@ -471,6 +484,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
         row.cells['Human Review'] === true,
         state.items[id]?.lastWrittenHumanReview,
         typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
+        String(row.cells['Review Owner'] ?? ''),
       );
       const pending = rule.drift ? rule.write(true) : {};
       // As on the present-item path, drift must be repaired even when the write changes no
@@ -502,6 +516,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       row.cells['Human Review'] === true,
       state.items[id]?.lastWrittenHumanReview,
       typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined,
+      String(row.cells['Review Owner'] ?? ''),
     ).write(true);
     changes.push({ action: 'missing', item: ghost, rowId: row.rowId, cells: { 'Sync Status': label, ...reviewWrite, 'Last Synced': now }, reasons: [wasConflict ? 'item no longer found in repository; the unresolved conflict is kept too' : 'item no longer found in repository; row kept for a human to close or merge'] });
     }
