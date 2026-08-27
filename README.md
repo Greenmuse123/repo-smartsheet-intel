@@ -13,7 +13,7 @@ Repository → Scanner → Extractors → Normalized Project Model → Validatio
 
 - Works with **or without** Smartsheet API access (CSV fallback).
 - `sync --dry-run` shows every change before anything is written.
-- 88 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, the required-column guard on the real Smartsheet target, invalid credentials, authorization vs. token errors, plan-restriction errors, rate-limit retries, and dry-run safety. They run against a fake `fetch`; no test performs a live API call.
+- 94 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, the required-column guard on the real Smartsheet target, invalid credentials, authorization vs. token errors, plan-restriction errors, rate-limit retries, and dry-run safety. They run against a fake `fetch`; no test performs a live API call.
 
 ---
 
@@ -131,7 +131,7 @@ app/
     adapters/csv.ts          CSV + column-definitions fallback
     report/report.ts         Repository Intelligence Report
     log/logger.ts            plain-language logging
-  tests/                     vitest suites (61 tests)
+  tests/                     vitest suites (94 tests)
   examples/sample-repo/      "Orderly" demo repository + sample-repo.project-config.yaml
   docs/                      DATA-MAPPING.md · smartsheet-import.md · DEMO.md
 ```
@@ -141,7 +141,7 @@ app/
 ```
 cd app
 npm install
-npm test          # 61 tests
+npm test          # 94 tests
 npm run typecheck
 ```
 
@@ -215,7 +215,7 @@ See `src/model/types.ts`. `RawEvidence` is kept inside `ProjectItem.evidence`. I
 4. `--dry-run` prints the plan and stops.
 5. `applyPlan`: one `POST /rows` per ≤400 creates, one `PUT /rows` per ≤400 updates, serialized per sheet; then the local state cache is saved.
 
-State (`.repo-smartsheet/state.json`) is a cache. Identity, fingerprint and both last-written shared values are also stored in the sheet (`Item ID`, `Repo Fingerprint`, `Repo Status`), so a fresh clone with no state still produces zero duplicates (tested).
+State (`.repo-smartsheet/state.json`) is a cache. Identity, fingerprint and both last-written shared values are also stored in the sheet (`Item ID`, `Repo Fingerprint`, `Repo Status`, `Repo Review`), so a fresh clone with no state still produces zero duplicates (tested).
 
 ## Conflict handling
 
@@ -301,7 +301,7 @@ The computer reads the sticky notes inside the toy box, copies them neatly onto 
   possible in a very large repository. Salting would break state-free reconstruction, so the
   digest stays; collisions are detected rather than silently merged (the planner warns when two
   rows claim one `Item ID`), and paths are redacted before publication.
-- **State management:** local `state.json` is a cache; `Item ID` + `Repo Fingerprint` + `Repo Status` + `Repo Review` in the sheet are sufficient to rebuild it (tested). Those three plus `Sync Status` are enforced as required columns: `SmartsheetTarget` refuses to sync a sheet missing any of them rather than silently mislabelling edits.
+- **State management:** local `state.json` is a cache; `Item ID` + `Repo Fingerprint` + `Repo Status` + `Repo Review` in the sheet are sufficient to rebuild it (tested). Those four plus `Sync Status` are enforced as required columns: `SmartsheetTarget` refuses to sync a sheet missing any of them rather than silently mislabelling edits.
 - **Security:** sensitive-path gate before ignore rules, regex redaction at the excerpt boundary, env-only credentials, no repo writes.
 - **Conflict handling:** human-controlled columns written on create only; shared columns merged; conflicts keep the human value and flag.
-- **Testing:** 61 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.
+- **Testing:** 94 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.

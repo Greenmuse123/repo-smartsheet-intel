@@ -514,3 +514,99 @@ describe('an older sheet without Repo Review must still behave (round-6 self-rev
     expect(target.rows[0].cells['Human Review']).toBe(true);
   });
 });
+
+
+describe('round-6 review regressions', () => {
+  const T4 = '2026-08-24T13:00:00Z', T5 = '2026-08-24T14:00:00Z';
+  const check = (state: 'x' | ' ') => ({
+    extractor: 'readme-checklist',
+    sourceType: state === 'x' ? 'Markdown checklist (checked)' : 'Markdown checklist (unchecked)',
+    path: 'README.md', line: 5, section: 'Roadmap', excerpt: 'ship it',
+  } as RawEvidence);
+
+  it('does not relabel a human tick as its own when flagging a row missing (R6-02)', async () => {
+    // The missing pass wrote Human Review AND Repo Review true unconditionally. If the box was
+    // already a person's, that rewrote its authorship to ours - and the next ordinary update
+    // then cleared their decision.
+    const a = ev('src/a.js', 'one'), other = ev('src/other.js', 'keep me');
+    await run(items(a, other), T1);
+    const aId = items(a)[0].itemId;
+    const row = target.rows.find((r) => r.cells['Item ID'] === aId)!;
+    row.cells['Human Review'] = true;                 // a person ticks it; Repo Review stays false
+    expect(row.cells['Repo Review']).toBe(false);
+
+    await run(items(other), T2);                      // the item vanishes
+    expect(row.cells['Sync Status']).toBe('Missing in Repo');
+    expect(row.cells['Human Review']).toBe(true);
+    expect(row.cells['Repo Review']).toBe(false);     // still theirs, not ours
+
+    await run(items(a, other), T3);                   // it comes back
+    expect(row.cells['Human Review']).toBe(true);     // and their tick survives
+  });
+
+  it('reports a cleared Status even when the row was missing or conflicted (R6-03)', async () => {
+    // The cleared-Status handler sat AFTER the missing and resolved-conflict branches, so on
+    // those paths a blank cell was silently overwritten - exactly what the fix was meant to stop.
+    const other = ev('src/other.js', 'keep me');
+    const a = ev('src/a.js', 'one');
+    await run(items(a, other), T1);
+    const aId = items(a)[0].itemId;
+    const row = target.rows.find((r) => r.cells['Item ID'] === aId)!;
+
+    await run(items(other), T2);                      // vanishes
+    expect(row.cells['Sync Status']).toBe('Missing in Repo');
+
+    row.cells['Status'] = '';                         // a person empties the cell
+    const p = await run(items(a, other), T3);         // and it returns unchanged
+    expect(row.cells['Status']).toBe('Not Started');  // restored...
+    const change = p.changes.find((c) => c.item.itemId === aId)!;
+    expect(change.reasons.join(' ')).toMatch(/cleared/); // ...and said so
+    expect(row.cells['Human Review']).toBe(true);     // and flagged
+  });
+
+  it('leaves rows alone when two of them claim one Item ID, instead of flip-flopping (R6-04)', async () => {
+    // The row map keeps only the last row for an id, so two colliding items took turns
+    // overwriting one row's evidence - a different item every run, forever.
+    const a = ev('src/a.js', 'one');
+    await run(items(a), T1);
+    const original = { ...target.rows[0].cells };
+    target.rows.push({ rowId: 9999, cells: { ...original } } as typeof target.rows[number]);
+
+    const p = await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
+    expect(p.counts.update).toBe(0);
+    expect(p.counts.create).toBe(0);                  // never a third row either
+    expect(target.rows).toHaveLength(2);
+    expect(target.rows[0].cells['Source Commit']).toBe(original['Source Commit']); // untouched
+    expect(p.changes[0].reasons.join(' ')).toMatch(/more than one sheet row claims/);
+  });
+});
+
+describe('the review baseline must not go stale (round-6 R6-05)', () => {
+  it('prefers the local cache over a stale Repo Review cell', async () => {
+    // The sheet mirror was consulted first, so a technical cell that had gone stale (added by
+    // hand to an old sheet, edited, or written by an older build) outranked a correct cache
+    // and cleared a person's tick.
+    await run(items(ev('src/a.js', 'one')), T1);
+    target.rows[0].cells['Repo Review'] = true;    // stale: we actually last wrote false
+    target.rows[0].cells['Human Review'] = true;   // and a person ticked it
+
+    await run(items(ev('src/a.js', 'one', { commit: 'abc1234' })), T2);
+    expect(target.rows[0].cells['Human Review']).toBe(true); // their decision survives
+  });
+
+  it('records the review value the missing pass wrote, so the cache cannot go stale', async () => {
+    // The missing write updates the sheet but cannot call remember() (a vanished item has no
+    // fingerprint). It must still record the checkbox it set, or the cache disagrees with the
+    // sheet and the next run reads the tool's own tick as a human edit.
+    const a = ev('src/a.js', 'one'), other = ev('src/other.js', 'keep me');
+    await run(items(a, other), T1);
+    const aId = items(a)[0].itemId;
+    await run(items(other), T2);
+    expect(state.items[aId].lastWrittenHumanReview).toBe(true);
+    const row = target.rows.find((r) => r.cells['Item ID'] === aId)!;
+    expect(row.cells['Human Review']).toBe(true);
+
+    await run(items(a, other), T3);
+    expect(row.cells['Human Review']).toBe(false);  // ours, so ours to clear
+  });
+});

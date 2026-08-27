@@ -125,6 +125,14 @@ describe('the real Smartsheet target, not just the in-memory one (round-3 review
     await expect(t.readRows()).resolves.toEqual([]);
   });
 
+  it('refuses to sync a sheet missing Repo Review, the Human Review baseline (R6-01)', async () => {
+    // Without it the engine cannot tell its own tick from a person's, so several merge paths
+    // quietly lose a human decision. A sheet that cannot implement the documented behaviour
+    // must fail loudly, exactly as one missing the Status baseline does.
+    const t = new SmartsheetTarget(clientReturning(sheetOf(ALL.filter((x) => x !== 'Repo Review'))), '1');
+    await expect(t.readRows()).rejects.toMatchObject({ name: 'SmartsheetError', message: /Repo Review/ });
+  });
+
   it('refuses to sync a sheet missing Repo Status, the three-way merge baseline (R2-04)', async () => {
     // Repo Status is the sheet-side record of what WE last wrote. Without it the planner
     // cannot distinguish a human edit from a repository change on a fresh clone, so it must

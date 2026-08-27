@@ -19,7 +19,7 @@ const PICKLIST_COLUMNS = new Set(COLUMNS.filter((c) => c.type === 'PICKLIST').ma
  * the baseline of the three-way merge. Without it a fresh clone cannot tell a human edit from
  * a repository change, and would mislabel one as the other.
  */
-const REQUIRED_COLUMNS = ['Item ID', 'Repo Fingerprint', 'Sync Status', 'Repo Status'];
+const REQUIRED_COLUMNS = ['Item ID', 'Repo Fingerprint', 'Sync Status', 'Repo Status', 'Repo Review'];
 
 export class SmartsheetTarget implements SheetTarget {
   readonly sheetId: string;

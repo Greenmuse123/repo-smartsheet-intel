@@ -25,8 +25,10 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     byItemId.set(id, r);
   }
   if (duplicateIds.size) {
-    // Silently keeping only the last row would let the sheet drift forever without anyone knowing.
-    log.warn(`${duplicateIds.size} Item ID(s) appear on more than one row: ${[...duplicateIds].join(', ')}. Only the last row of each is synchronized; a human should merge or delete the extras.`);
+    // Writing to one of several rows that claim the same Item ID is worse than doing nothing:
+    // the map keeps only the last, so two different items would take turns overwriting one
+    // row's evidence, flipping it on every run. Leave those rows completely alone and say so.
+    log.warn(`${duplicateIds.size} Item ID(s) appear on more than one row: ${[...duplicateIds].join(', ')}. Those rows are left untouched until a human merges or deletes the duplicates - writing to them would overwrite one item's evidence with another's.`);
   }
 
   const changes: PlannedChange[] = [];
@@ -34,6 +36,11 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
 
   for (const item of items) {
     seen.add(item.itemId);
+    if (duplicateIds.has(item.itemId)) {
+      // Not a create either - that would add a third row with the same identity.
+      changes.push({ action: 'unchanged', item, cells: {}, reasons: [`skipped: more than one sheet row claims Item ID ${item.itemId}; merge or delete the duplicates and re-run`] });
+      continue;
+    }
     const row = byItemId.get(item.itemId);
     if (!row) {
       changes.push({ action: 'create', item, cells: { ...repoCells(item, 'New', now), ...humanSeedCells(item), ...sharedCells(item.status, item.humanReviewRequired) }, reasons: ['not in sheet yet'] });
@@ -74,11 +81,17 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // sheet against what WE last wrote. If they differ, a person deliberately (un)checked it,
     // and that decision outranks our recomputation.
     const sheetReview = row.cells['Human Review'] === true;
-    // Prefer the sheet's own mirror column over the local cache, exactly as `Repo Status` is
-    // preferred over `st.lastWrittenStatus`: a lost state file must not change any decision.
-    const reviewBaseline = typeof row.cells['Repo Review'] === 'boolean'
-      ? (row.cells['Repo Review'] as boolean)
-      : st?.lastWrittenHumanReview;
+    // When we need a row reviewed we must not claim authorship of a tick that is already
+    // there: writing `Repo Review = true` over a person's own true relabels their decision as
+    // ours, and the next ordinary update then clears it. If the box is already ticked, leave
+    // both cells alone and let whoever owns it keep owning it.
+    const askForReview = (): CellValues => (sheetReview ? {} : { 'Human Review': true, 'Repo Review': true });
+    // The local cache is written in the same breath as the write it records, so when it exists
+    // it is the most reliable answer to "what did WE last write". `Repo Review` is the fallback
+    // that survives losing the cache - a mirror, not an override, since a technical cell can go
+    // stale (hand-edited, added later to an old sheet, written by an older build).
+    const reviewBaseline = st?.lastWrittenHumanReview
+      ?? (typeof row.cells['Repo Review'] === 'boolean' ? (row.cells['Repo Review'] as boolean) : undefined);
     let reviewAfterUpdate: boolean;
     if (reviewBaseline !== undefined) {
       // We know what we last wrote: if the sheet differs, a person changed it and wins.
@@ -99,15 +112,21 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
         // leave the row flagged missing forever. If the human's Status still disagrees
         // with the repository, this is a live conflict - never label it Synced.
         const syncStatus: SyncStatus = conflicted ? 'Conflict' : 'Synced';
-        const reason = conflicted
+        const reasons = [conflicted
           ? `item reappeared with the conflict still unresolved: sheet says "${sheetStatus}", repo says "${item.status}"`
-          : 'item reappeared in the repository unchanged; clearing "Missing in Repo"';
+          : 'item reappeared in the repository unchanged; clearing "Missing in Repo"'];
+        // A cleared Status must be reported here too, not only on the plain path below.
+        if (humanClearedStatus) reasons.push(`Status had been cleared in the sheet; restored "${item.status}" from the repository`);
         changes.push({
           action: conflicted ? 'conflict' : 'update',
           item,
           rowId: row.rowId,
-          cells: { ...repoCells(item, syncStatus, now), ...sharedCells(sheetStatus !== '' ? (sheetStatus as Status) : item.status, conflicted || reviewAfterUpdate) },
-          reasons: [reason],
+          cells: {
+            ...repoCells(item, syncStatus, now),
+            ...sharedCells(sheetStatus !== '' ? (sheetStatus as Status) : item.status, conflicted || humanClearedStatus || reviewAfterUpdate),
+            ...(humanClearedStatus || conflicted ? askForReview() : {}),
+          },
+          reasons,
         });
         continue;
       }
@@ -120,8 +139,14 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
           action: 'update',
           item,
           rowId: row.rowId,
-          cells: { ...repoCells(item, 'Synced', now), ...sharedCells(item.status, reviewAfterUpdate) },
-          reasons: ['conflict resolved: the sheet now agrees with the repository'],
+          cells: {
+            ...repoCells(item, 'Synced', now),
+            ...sharedCells(item.status, humanClearedStatus || reviewAfterUpdate),
+            ...(humanClearedStatus ? askForReview() : {}),
+          },
+          reasons: humanClearedStatus
+            ? ['conflict resolved: the sheet now agrees with the repository', `Status had been cleared in the sheet; restored "${item.status}" from the repository`]
+            : ['conflict resolved: the sheet now agrees with the repository'],
         });
         continue;
       }
@@ -133,7 +158,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
           action: 'update',
           item,
           rowId: row.rowId,
-          cells: { ...repoCells(item, 'Updated', now), ...sharedCells(item.status, true) },
+          cells: { ...repoCells(item, 'Updated', now), ...sharedCells(item.status, true), ...askForReview() },
           reasons: [`Status had been cleared in the sheet; restored "${item.status}" from the repository and flagged for review`],
         });
         continue;
@@ -187,7 +212,13 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       else if (repoChangedStatus) reasons.push(`status ${lastWrittenStatus || '(none)'} → ${item.status}`);
     }
 
-    changes.push({ action, item, rowId: row.rowId, cells: { ...repoCells(item, syncStatus, now), ...sharedCells(status, humanReview) }, reasons });
+    changes.push({ action, item, rowId: row.rowId, cells: {
+      ...repoCells(item, syncStatus, now),
+      ...sharedCells(status, humanReview),
+      // Forcing review on because of a conflict or a cleared Status must not overwrite a
+      // tick that was already a person's own.
+      ...(humanReview && (action === 'conflict' || humanClearedStatus) ? askForReview() : {}),
+    }, reasons });
   }
 
   for (const [id, row] of byItemId) {
@@ -222,9 +253,12 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     const wasConflict = sync === 'Conflict';
     const label: SyncStatus = wasConflict ? 'Conflict (missing in repo)' : 'Missing in Repo';
     const ghost = { itemId: id, item: String(row.cells['Item'] ?? id) } as ProjectItem;
-    // `Repo Review` must move with `Human Review`. Without it the next run sees our own tick
-    // sitting against a stale `false` baseline, calls it a human edit, and strands it checked.
-    changes.push({ action: 'missing', item: ghost, rowId: row.rowId, cells: { 'Sync Status': label, 'Human Review': true, 'Repo Review': true, 'Last Synced': now }, reasons: [wasConflict ? 'item no longer found in repository; the unresolved conflict is kept too' : 'item no longer found in repository; row kept for a human to close or merge'] });
+    // `Repo Review` must move with `Human Review` when WE tick it - otherwise the next run
+    // reads our own tick as a human edit and strands it. But if the box is already ticked we
+    // write neither, so a person's tick stays theirs.
+    const alreadyTicked = row.cells['Human Review'] === true;
+    const reviewCells: CellValues = alreadyTicked ? {} : { 'Human Review': true, 'Repo Review': true };
+    changes.push({ action: 'missing', item: ghost, rowId: row.rowId, cells: { 'Sync Status': label, ...reviewCells, 'Last Synced': now }, reasons: [wasConflict ? 'item no longer found in repository; the unresolved conflict is kept too' : 'item no longer found in repository; row kept for a human to close or merge'] });
   }
 
   const counts = { create: 0, update: 0, unchanged: 0, conflict: 0, missing: 0 };
@@ -260,7 +294,17 @@ export async function applyPlan(plan: SyncPlan, target: SheetTarget, state: Sync
   }
   if (updates.length) {
     updated = await target.updateRows(updates.map((c) => ({ rowId: c.rowId!, cells: c.cells })));
-    for (const c of updates) if (c.action !== 'missing') remember(state, c, c.rowId!, now);
+    for (const c of updates) {
+      if (c.action !== 'missing') { remember(state, c, c.rowId!, now); continue; }
+      // A missing write carries no fingerprint (the item is gone), so it must not call
+      // remember() - but when it ticks the review box it MUST record that it did, or the
+      // cache goes stale and the next run reads our own tick as a human edit.
+      const st = state.items[c.item.itemId];
+      if (st && (c.cells as CellValues)['Human Review'] !== undefined) {
+        st.lastWrittenHumanReview = (c.cells as CellValues)['Human Review'] === true;
+        st.lastSyncedAt = now;
+      }
+    }
     log.info(`Updated ${updated} row${updated === 1 ? '' : 's'} in the sheet.`);
   }
   state.lastRunAt = now;
