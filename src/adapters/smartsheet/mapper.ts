@@ -46,5 +46,7 @@ export function humanSeedCells(item: ProjectItem): CellValues {
 
 /** Shared fields. */
 export function sharedCells(status: Status, humanReview: boolean): CellValues {
-  return { 'Status': status, 'Human Review': humanReview };
+  // `Repo Review` mirrors what we wrote, so the next run can tell our checkbox from a human's
+  // even with no state file. It is the Human Review analogue of `Repo Status`.
+  return { 'Status': status, 'Human Review': humanReview, 'Repo Review': humanReview };
 }

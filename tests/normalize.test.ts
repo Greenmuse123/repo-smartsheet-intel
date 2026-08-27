@@ -160,3 +160,23 @@ describe('redaction must not destroy identity (round-2 review regression)', () =
     expect(out[0].repositoryPath).not.toContain('REDACTED');
   });
 });
+
+
+describe('a hash collision must never discard evidence (round-5 review R5-05)', () => {
+  it('keeps both items when two different files collide in the truncated Item ID', () => {
+    // `seen` de-duplicated on the 8-hex id, so a 32-bit collision between two genuinely
+    // different files silently dropped one of them - the one failure mode this tool must not
+    // have. De-duplication now keys on the full identity string.
+    const a = todo({ path: 'src/generated/p42207.ts' });
+    const b = todo({ path: 'src/generated/p46459.ts' });
+    expect(itemIdFor(a)).toBe(itemIdFor(b)); // a genuine 32-bit collision, verified
+    const out = normalize([a, b]);
+    expect(out).toHaveLength(2);
+    expect(out.map((i) => i.repositoryPath).sort()).toEqual(['src/generated/p42207.ts', 'src/generated/p46459.ts']);
+  });
+
+  it('still collapses genuinely identical evidence seen twice', () => {
+    const a = todo({ path: 'src/a.ts' });
+    expect(normalize([a, { ...a }])).toHaveLength(1);
+  });
+});

@@ -403,3 +403,97 @@ describe('losing state.json must not lose a human decision (round-5 self-review)
     expect(target.rows[0].cells['Human Review']).toBe(false);
   });
 });
+
+
+describe('round-5 review regressions', () => {
+  const T4 = '2026-08-24T13:00:00Z', T5 = '2026-08-24T14:00:00Z';
+  const check = (state: 'x' | ' ', section = 'Roadmap') => ({
+    extractor: 'readme-checklist',
+    sourceType: state === 'x' ? 'Markdown checklist (checked)' : 'Markdown checklist (unchecked)',
+    path: 'README.md', line: 5, section, excerpt: 'ship it',
+  } as RawEvidence);
+
+  it('does not mistake its own missing-row tick for a human edit (R5-01)', async () => {
+    // The missing write sets Human Review, but skipped recording that it had. On return, our
+    // own tick sat against a stale `false` baseline, was read as a human decision, and stuck.
+    const a = ev('src/a.js', 'one'), other = ev('src/other.js', 'keep me');
+    await run(items(a, other), T1);
+    const aId = items(a)[0].itemId;
+    const row = target.rows.find((r) => r.cells['Item ID'] === aId)!;
+    expect(row.cells['Human Review']).toBe(false);
+
+    await run(items(other), T2);                       // vanishes: WE tick the box
+    expect(row.cells['Human Review']).toBe(true);
+    expect(row.cells['Repo Review']).toBe(true);       // and we record that it was ours
+
+    await run(items(a, other), T3);                    // returns unchanged
+    expect(row.cells['Sync Status']).toBe('Synced');
+    expect(row.cells['Human Review']).toBe(false);     // ours, so ours to clear
+  });
+
+  it('uses the sheet as the review baseline, so a lost state file changes nothing (R5-02)', async () => {
+    // Human Review's "what did WE last write" lived only in state.json, while Status had a
+    // sheet-side mirror in `Repo Status`. So on a fresh clone the engine could not tell its own
+    // tick from a person's, and on a row carrying one of its own markers it recomputed from the
+    // item - re-checking a box a human had deliberately CLEARED. The fix is symmetry: a
+    // `Repo Review` column mirrors what we wrote, so no local file is needed to tell them apart.
+    const risk = (over: Partial<RawEvidence> = {}): RawEvidence => ({
+      extractor: 'risk-heuristics', sourceType: 'Risk heuristic', path: 'src/auth/session.js',
+      line: 5, excerpt: 'FIXME in a security-sensitive file: sessions never expire', ...over,
+    });
+    await run(normalize([risk()]), T1);
+    const row = target.rows[0];
+    expect(row.cells['Human Review']).toBe(true);   // the item itself asks for review
+    expect(row.cells['Repo Review']).toBe(true);    // and the sheet records that WE asked
+
+    row.cells['Human Review'] = false;              // a person looks at it and clears the flag
+    state = { version: 1, sheetId: 'sheet-1', items: {} }; // fresh clone: no local baseline
+
+    await run(normalize([risk({ commit: 'abc1234' })]), T2); // an unrelated repo change lands
+    expect(row.cells['Sync Status']).toBe('Updated');
+    expect(row.cells['Human Review']).toBe(false);  // their decision survives with no state file
+    expect(row.cells['Repo Review']).toBe(false);   // and the baseline follows it
+
+    const p = await run(normalize([risk({ commit: 'abc1234' })]), T3);
+    expect(p.counts.unchanged).toBe(1);             // settles instead of re-checking every run
+    expect(row.cells['Human Review']).toBe(false);
+  });
+
+  it('lets a human resolve a conflict on an item that is gone for good (R5-03)', async () => {
+    // The missing loop skipped both missing labels unconditionally, so a permanently deleted
+    // item kept its conflict marker forever even after a person made the sheet agree.
+    const other = ev('src/other.js', 'keep me');
+    await run(normalize([check(' '), other]), T1);
+    const id = normalize([check(' ')])[0].itemId;
+    const row = target.rows.find((r) => r.cells['Item ID'] === id)!;
+    row.cells['Status'] = 'Blocked';
+    await run(normalize([check('x'), other]), T2);
+    expect(row.cells['Sync Status']).toBe('Conflict');
+
+    await run(normalize([other]), T3);                 // deleted from the repo for good
+    expect(row.cells['Sync Status']).toBe('Conflict (missing in repo)');
+
+    row.cells['Status'] = 'Done';                      // human agrees with the last repo value
+    await run(normalize([other]), T4);
+    expect(row.cells['Sync Status']).toBe('Missing in Repo'); // conflict resolved, still missing
+    expect(row.cells['Human Review']).toBe(false);
+
+    const p = await run(normalize([other]), T5);       // and it settles, not oscillates
+    expect(p.counts.missing).toBe(0);
+    expect(row.cells['Sync Status']).toBe('Missing in Repo');
+  });
+
+  it('never silently overwrites a Status a person cleared (R5-04)', async () => {
+    // A Smartsheet dropdown can be emptied. Blank was read as "no human value", so the repo
+    // value was written straight back with no trace that anything had been done.
+    await run(items(ev('src/a.js', 'one')), T1);
+    target.rows[0].cells['Status'] = '';               // a person clears the cell
+
+    const p = await run(items(ev('src/a.js', 'one')), T2); // nothing else changed
+    expect(p.counts.unchanged).toBe(0);                // it must not be dismissed as unchanged
+    expect(target.rows[0].cells['Status']).toBe('Not Started'); // restored, since blank breaks reports
+    expect(target.rows[0].cells['Human Review']).toBe(true);    // ...but flagged, never silent
+    const reason = p.changes[0].reasons.join(' ');
+    expect(reason).toMatch(/cleared/);
+  });
+});

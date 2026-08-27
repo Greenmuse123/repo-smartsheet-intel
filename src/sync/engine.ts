@@ -43,6 +43,12 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     const sheetFingerprint = String(row.cells['Repo Fingerprint'] ?? st?.fingerprint ?? '');
     const lastWrittenStatus = String(row.cells['Repo Status'] ?? st?.lastWrittenStatus ?? '');
     const sheetStatus = String(row.cells['Status'] ?? '');
+    // A blank Status is not "no human value": a person can clear a Smartsheet dropdown. If it
+    // differs from what we last wrote, someone cleared it, and restoring the repository value
+    // silently would be exactly the overwrite this tool promises never to do. We restore it -
+    // a blank Status breaks every report - but we say so and flag it rather than doing it
+    // quietly. `humanChangedStatus` stays false so the restored value is ours, not theirs.
+    const humanClearedStatus = sheetStatus === '' && lastWrittenStatus !== '';
     const humanChangedStatus = sheetStatus !== '' && sheetStatus !== lastWrittenStatus;
     const repoChangedStatus = item.status !== lastWrittenStatus;
     const repoChanged = sheetFingerprint !== item.fingerprint;
@@ -68,19 +74,19 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     // sheet against what WE last wrote. If they differ, a person deliberately (un)checked it,
     // and that decision outranks our recomputation.
     const sheetReview = row.cells['Human Review'] === true;
-    const reviewBaseline = st?.lastWrittenHumanReview;
+    // Prefer the sheet's own mirror column over the local cache, exactly as `Repo Status` is
+    // preferred over `st.lastWrittenStatus`: a lost state file must not change any decision.
+    const reviewBaseline = typeof row.cells['Repo Review'] === 'boolean'
+      ? (row.cells['Repo Review'] as boolean)
+      : st?.lastWrittenHumanReview;
     let reviewAfterUpdate: boolean;
     if (reviewBaseline !== undefined) {
       // We know what we last wrote: if the sheet differs, a person changed it and wins.
       reviewAfterUpdate = sheetReview !== reviewBaseline ? sheetReview : item.humanReviewRequired;
-    } else if (alreadyConflict || wasMissing) {
-      // No baseline (fresh clone, lost state). The row is flagged Conflict or Missing, which
-      // are the states WE tick the box in, so it is ours to recompute.
-      reviewAfterUpdate = item.humanReviewRequired;
     } else {
-      // No baseline and no flag of ours to explain the tick - so assume a person put it there.
-      // Leaving a stale flag costs someone one glance; clearing a real one loses a decision
-      // silently, and this tool's whole promise is that human input survives.
+      // Truly no baseline (a sheet from before `Repo Review` existed, and no state file). We
+      // cannot tell our tick from a person's, so keep it: leaving a stale flag costs one
+      // glance, clearing a real one loses a decision silently.
       reviewAfterUpdate = sheetReview || item.humanReviewRequired;
     }
 
@@ -120,6 +126,18 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
         continue;
       }
 
+      if (humanClearedStatus) {
+        // Someone emptied the Status cell. A blank Status breaks every report and rollup, so
+        // the repository value goes back - but loudly, flagged, and never silently.
+        changes.push({
+          action: 'update',
+          item,
+          rowId: row.rowId,
+          cells: { ...repoCells(item, 'Updated', now), ...sharedCells(item.status, true) },
+          reasons: [`Status had been cleared in the sheet; restored "${item.status}" from the repository and flagged for review`],
+        });
+        continue;
+      }
       changes.push({ action: 'unchanged', item, rowId: row.rowId, cells: {}, reasons: [alreadyConflict ? 'fingerprint matches; conflict still unresolved' : 'fingerprint matches'] });
       continue;
     }
@@ -156,10 +174,14 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       syncStatus = 'Updated';
       // A human who moved Status while the repository stayed put is ahead, not wrong.
       status = humanChangedStatus && sheetStatus !== '' ? (sheetStatus as Status) : item.status;
+      if (humanClearedStatus) {
+        reasons.push(`Status had been cleared in the sheet; restored "${item.status}" from the repository`);
+      }
       // Recompute Human Review from the item UNLESS a human moved the checkbox themselves.
       // Carrying our own stale value forward leaves a resolved row flagged forever; blindly
       // resetting it erases a person's deliberate "look at this".
-      humanReview = reviewAfterUpdate;
+      // A restored Status is something a person should see, whatever the item itself says.
+      humanReview = humanClearedStatus ? true : reviewAfterUpdate;
       if (alreadyConflict) reasons.push('conflict resolved: the sheet now agrees with the repository');
       else if (humanChangedStatus) reasons.push(`kept human status "${sheetStatus}"`);
       else if (repoChangedStatus) reasons.push(`status ${lastWrittenStatus || '(none)'} → ${item.status}`);
@@ -171,13 +193,32 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
   for (const [id, row] of byItemId) {
     if (seen.has(id)) continue;
     const sync = String(row.cells['Sync Status'] ?? '');
-    if (sync === 'Missing in Repo' || sync === 'Conflict (missing in repo)') continue; // already flagged
+    if (sync === 'Conflict (missing in repo)') {
+      // A human can resolve a conflict on a row whose item is gone for good. If they have made
+      // Status agree with what the repository last said, downgrade to plain "Missing in Repo" -
+      // otherwise the conflict marker is stuck forever on an item that will never return.
+      const sheetStatus = String(row.cells['Status'] ?? '');
+      const repoStatus = String(row.cells['Repo Status'] ?? '');
+      if (sheetStatus !== '' && repoStatus !== '' && sheetStatus === repoStatus) {
+        changes.push({
+          action: 'missing',
+          item: { itemId: id, item: String(row.cells['Item'] ?? id) } as ProjectItem,
+          rowId: row.rowId,
+          cells: { 'Sync Status': 'Missing in Repo', 'Human Review': false, 'Repo Review': false, 'Last Synced': now },
+          reasons: ['conflict resolved by a human; the item is still gone from the repository'],
+        });
+      }
+      continue;
+    }
+    if (sync === 'Missing in Repo') continue; // already flagged
     // Flagging a CONFLICTED row as missing must not erase the conflict: it is still unresolved,
     // and the human's decision is the thing most worth preserving. Record both facts.
     const wasConflict = sync === 'Conflict';
     const label: SyncStatus = wasConflict ? 'Conflict (missing in repo)' : 'Missing in Repo';
     const ghost = { itemId: id, item: String(row.cells['Item'] ?? id) } as ProjectItem;
-    changes.push({ action: 'missing', item: ghost, rowId: row.rowId, cells: { 'Sync Status': label, 'Human Review': true, 'Last Synced': now }, reasons: [wasConflict ? 'item no longer found in repository; the unresolved conflict is kept too' : 'item no longer found in repository; row kept for a human to close or merge'] });
+    // `Repo Review` must move with `Human Review`. Without it the next run sees our own tick
+    // sitting against a stale `false` baseline, calls it a human edit, and strands it checked.
+    changes.push({ action: 'missing', item: ghost, rowId: row.rowId, cells: { 'Sync Status': label, 'Human Review': true, 'Repo Review': true, 'Last Synced': now }, reasons: [wasConflict ? 'item no longer found in repository; the unresolved conflict is kept too' : 'item no longer found in repository; row kept for a human to close or merge'] });
   }
 
   const counts = { create: 0, update: 0, unchanged: 0, conflict: 0, missing: 0 };

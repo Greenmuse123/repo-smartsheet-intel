@@ -21,7 +21,8 @@ Source of truth: `src/adapters/smartsheet/schema.ts` (the sheet is created from 
 | 15 | Human Review | Checkbox | needs a person | rules (Low, Risk, Unknown, Bug w/o owner, conflict, missing) | Yes (sets true) | **Yes** (clear it) - merged |
 | 16 | Sync Status | Dropdown | New / Synced / Updated / Conflict / Missing in Repo / Error | sync engine | Yes | Overwritten |
 | 17 | AI Suggestion | Text | interpretation, never fact | heuristics + optional LLM | Yes | Overwritten |
-| 18 | Repo Status | Dropdown | what the repo says right now (basis for conflict detection) | sync engine | Yes | Overwritten |
+| 18 | Repo Status | Dropdown | what the repo says right now (basis for Status conflict detection) | sync engine | Yes | Overwritten |
+| 18a | Repo Review | Checkbox | the Human Review value this tool last wrote (lets your tick be told from ours without a local state file) | sync engine | Yes | Overwritten |
 | 19 | Source Commit | Text | short SHA | git | Yes | Overwritten |
 | 20 | Management Notes | Text | PM free text | - | **Never** | **Yes** |
 | 21 | Last Synced | Text | ISO timestamp | sync engine | Yes | Overwritten |

@@ -9,11 +9,11 @@ Repository → Scanner → Extractors → Normalized Project Model → Validatio
 **Three promises, stated precisely:**
 1. **It does not copy a value into a fact column unless the repository literally states it.** Owner, priority, dates and milestones stay blank otherwise. The one deliberate inference is `Status`: a TODO that is still present is recorded as `Not Started`, because the comment describing the work still exists. That is a documented rule, not a fact read out of the file, and it is the only place the tool asserts something the repository did not say.
 2. **Every row carries its provenance** - the file, and the line where evidence has one. Repository-wide heuristics (for example "package.json has no lockfile") cite `(repository)` because they are about the repo as a whole, not a line.
-3. **It never overwrites a decision a person made in the sheet.** Human-controlled columns are written on create only; a disagreement over `Status` is surfaced as a Conflict with the human's value kept.
+3. **It never silently overwrites a decision a person made in the sheet.** Human-controlled columns are written on create only; a disagreement over `Status` is surfaced as a Conflict with the human's value kept. The one case where it does write over you is an emptied `Status` cell: a blank Status breaks every report and rollup, so the repository value is restored - and the row is flagged for review with a reason saying exactly that, never quietly.
 
 - Works with **or without** Smartsheet API access (CSV fallback).
 - `sync --dry-run` shows every change before anything is written.
-- 81 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, the required-column guard on the real Smartsheet target, invalid credentials, authorization vs. token errors, plan-restriction errors, rate-limit retries, and dry-run safety. They run against a fake `fetch`; no test performs a live API call.
+- 87 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, the required-column guard on the real Smartsheet target, invalid credentials, authorization vs. token errors, plan-restriction errors, rate-limit retries, and dry-run safety. They run against a fake `fetch`; no test performs a live API call.
 
 ---
 
@@ -66,7 +66,7 @@ Run step 4 (or 5) again whenever the code changes.
 | AI Suggestion | The program's guesses and notes. Never treated as fact. |
 | Management Notes | Your free-text space. The program never touches it. |
 
-The columns to the right of Sync Status are technical (Repo Status, Source Commit, Last Synced, Repo Fingerprint). Hide them if you like; the program needs them to stay honest.
+The columns to the right of Sync Status are technical (Repo Status, Repo Review, Source Commit, Last Synced, Repo Fingerprint). Hide them if you like; the program needs them to stay honest.
 
 ### What happens when something changes?
 
@@ -215,7 +215,7 @@ See `src/model/types.ts`. `RawEvidence` is kept inside `ProjectItem.evidence`. I
 4. `--dry-run` prints the plan and stops.
 5. `applyPlan`: one `POST /rows` per ≤400 creates, one `PUT /rows` per ≤400 updates, serialized per sheet; then the local state cache is saved.
 
-State (`.repo-smartsheet/state.json`) is a cache. Identity, fingerprint and last-written status are also stored in the sheet (`Item ID`, `Repo Fingerprint`, `Repo Status`), so a fresh clone with no state still produces zero duplicates (tested).
+State (`.repo-smartsheet/state.json`) is a cache. Identity, fingerprint and both last-written shared values are also stored in the sheet (`Item ID`, `Repo Fingerprint`, `Repo Status`), so a fresh clone with no state still produces zero duplicates (tested).
 
 ## Conflict handling
 
@@ -223,7 +223,7 @@ State (`.repo-smartsheet/state.json`) is a cache. Identity, fingerprint and last
 |---|---|---|
 | Repo-controlled | Item, Type, Component, Description, Source, Source Commit, Last Repo Update, Confidence, Sync Status, AI Suggestion, Repo Status, Last Synced, Repo Fingerprint | overwritten when the fingerprint changes |
 | Human-controlled | Priority, Owner, Dependency, Milestone, Due Date, Management Notes | written on row creation only (and only from literal evidence); never afterwards |
-| Shared | Status, Human Review | 3-way merge: last-written (Repo Status) vs sheet vs repo. Human-only change → keep. Repo-only change → apply. Both changed and differ → keep human, write repo value to Repo Status, `Sync Status = Conflict`, `Human Review = true`. |
+| Shared | Status, Human Review | 3-way merge against the value we last wrote, which the sheet keeps in `Repo Status` and `Repo Review` so no local file is needed. Human-only change → keep. Repo-only change → apply. Both changed and differ → keep human, write repo value to Repo Status, `Sync Status = Conflict`, `Human Review = true`. |
 
 Rows are never deleted. Vanished items → `Missing in Repo` + Human Review, flagged once.
 
@@ -301,7 +301,7 @@ The computer reads the sticky notes inside the toy box, copies them neatly onto 
   possible in a very large repository. Salting would break state-free reconstruction, so the
   digest stays; collisions are detected rather than silently merged (the planner warns when two
   rows claim one `Item ID`), and paths are redacted before publication.
-- **State management:** local `state.json` is a cache; `Item ID` + `Repo Fingerprint` + `Repo Status` in the sheet are sufficient to rebuild it (tested). Those three plus `Sync Status` are enforced as required columns: `SmartsheetTarget` refuses to sync a sheet missing any of them rather than silently mislabelling edits.
+- **State management:** local `state.json` is a cache; `Item ID` + `Repo Fingerprint` + `Repo Status` + `Repo Review` in the sheet are sufficient to rebuild it (tested). Those three plus `Sync Status` are enforced as required columns: `SmartsheetTarget` refuses to sync a sheet missing any of them rather than silently mislabelling edits.
 - **Security:** sensitive-path gate before ignore rules, regex redaction at the excerpt boundary, env-only credentials, no repo writes.
 - **Conflict handling:** human-controlled columns written on create only; shared columns merged; conflicts keep the human value and flag.
 - **Testing:** 61 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.

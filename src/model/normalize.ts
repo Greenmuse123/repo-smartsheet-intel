@@ -13,10 +13,11 @@
  *       place a Status is asserted rather than read.
  */
 import type { Confidence, ItemType, Priority, ProjectItem, RawEvidence, Status } from './types.js';
-import { fingerprintOf, itemIdFor } from './ids.js';
+import { fingerprintOf, identityKey, itemIdFor } from './ids.js';
 import { redact, redactPath } from '../scanner/secrets.js';
 import type { OwnerRule } from '../extractors/codeowners.js';
 import { ownerFor } from '../extractors/codeowners.js';
+import { log } from '../log/logger.js';
 
 export interface NormalizeOptions { ownerRules?: OwnerRule[] }
 
@@ -52,6 +53,7 @@ function tagRedactions(path: string, itemId: string): string {
 export function normalize(evidence: RawEvidence[], opts: NormalizeOptions = {}): ProjectItem[] {
   const items: ProjectItem[] = [];
   const seen = new Set<string>();
+  const idsSeen = new Set<string>();
   for (const raw of evidence) {
     if (raw.extractor === 'codeowners') continue; // used for owner seeding only, not an item
     // Redact EVERY free-text field that can reach a sheet cell, the CSV, a log line or
@@ -73,9 +75,19 @@ export function normalize(evidence: RawEvidence[], opts: NormalizeOptions = {}):
     // The hash is one-way. It is NOT a privacy guarantee on its own: it is an unsalted,
     // truncated digest, so someone who can guess a candidate path can confirm the guess
     // offline. It hides an unguessable value; it does not hide a guessable one.
-    const itemId = itemIdFor({ ...ev, path: raw.path });
-    if (seen.has(itemId)) continue; // identical evidence twice (e.g. duplicated TODO text in one file)
-    seen.add(itemId);
+    const rawEv = { ...ev, path: raw.path };
+    const itemId = itemIdFor(rawEv);
+    // De-duplicate on the FULL identity key, never on the truncated id. Two different files can
+    // collide in 32 bits, and dropping one would silently discard real repository evidence -
+    // the one thing this tool must never do. Real duplicates (the same TODO text twice in one
+    // file) share the whole key and still collapse.
+    const key = `${raw.extractor}|${identityKey(rawEv)}`;
+    if (seen.has(key)) continue;
+    if (idsSeen.has(itemId)) {
+      log.warn(`Two different items hash to the same Item ID ${itemId}; both are kept, and the sheet will show two rows with that ID. Rename or move one of the sources to separate them.`);
+    }
+    seen.add(key);
+    idsSeen.add(itemId);
     // Redaction is lossy in the other direction too: `src/token=aaa/a.ts` and
     // `src/token=bbb/a.ts` both publish as `src/token=[REDACTED]/a.ts`, so the two rows would
     // be indistinguishable on the sheet - same path, same Source, same fingerprint. Tag the
