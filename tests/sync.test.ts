@@ -990,3 +990,76 @@ describe('legacy adoption must be narrow (round-9 R9-05 / R9-06)', () => {
     expect(row.cells['Sync Status']).not.toBe('Missing in Repo');
   });
 });
+
+describe('round-10 review regressions', () => {
+  const T4 = '2026-08-24T13:00:00Z';
+  const risk = (over: Partial<RawEvidence> = {}): RawEvidence => ({
+    extractor: 'risk-heuristics', sourceType: 'Risk heuristic', path: 'src/auth/session.js',
+    line: 5, excerpt: 'FIXME in a security-sensitive file: sessions never expire', ...over,
+  });
+
+  it('adopts the cache of the row in front of it, not one from a deleted row (R10-01)', async () => {
+    // After the old split behaviour a sheet can hold BOTH caches. Preferring the new-ID one -
+    // which describes a row a person has since deleted - made the two records disagree, which
+    // reads as drift, and two runs later the tool cleared a real human tick.
+    const e = ev('src/a.js', 'one');
+    const [item] = items(e);
+    await run(items(e), T1);
+    const row = target.rows[0];
+    row.cells['Item ID'] = item.legacyItemIds![0];
+    row.cells['Repo Review'] = false;
+    row.cells['Human Review'] = true;                       // a person ticks the legacy row
+    state.items[item.legacyItemIds![0]] = { ...state.items[item.itemId], lastWrittenHumanReview: false };
+    state.items[item.itemId] = { ...state.items[item.itemId], lastWrittenHumanReview: true }; // stale, deleted row
+
+    await run(items(e), T2);
+    expect(row.cells['Human Review']).toBe(true);
+    await run(items(e), T3);
+    expect(row.cells['Human Review']).toBe(true);           // and still theirs a run later
+  });
+
+  it('repairs the review flag without rewriting the merge baselines (R10-02)', async () => {
+    // The convergence write spread repoCells, which rewrites Repo Status and Repo Fingerprint.
+    // On a row whose Status baseline was stale that silently destroyed a genuine both-sides-
+    // moved conflict - the same mistake the legacy-adoption branch had made.
+    await run(normalize([risk()]), T1);
+    const row = target.rows[0];
+    const id = normalize([risk()])[0].itemId;
+    row.cells['Repo Status'] = 'Not Started';               // the last value WE synced
+    row.cells['Status'] = 'In Progress';                    // a person moved away from it
+    row.cells['Human Review'] = false;
+    state.items[id].lastWrittenHumanReview = false;
+    row.cells['Repo Review'] = true;                        // drift, to force the repair path
+
+    await run(normalize([risk()]), T2);
+    expect(row.cells['Repo Status']).toBe('Not Started');   // the baseline is NOT clobbered
+    expect(row.cells['Status']).toBe('In Progress');        // and the human value is untouched
+  });
+
+  it('adopts a path-keyed item whose displayed text changed (R10-03)', async () => {
+    // For CI, tests and ADR the identity is the path alone, so a job or heading can be renamed
+    // without the ID changing. Requiring the Item text to match rejected those and stranded a
+    // human-owned row as Missing in Repo.
+    const ci = (section: string): RawEvidence => ({
+      extractor: 'ci', sourceType: 'CI workflow', path: '.github/workflows/ci.yml', line: 1, section,
+      excerpt: 'CI',
+    });
+    const [before] = normalize([ci('old-job')]);
+    const [after] = normalize([ci('renamed-job')]);
+    expect(after.itemId).toBe(before.itemId);               // same identity, different display
+    expect(after.item).not.toBe(before.item);
+
+    await run(normalize([ci('old-job')]), T1);
+    const row = target.rows[0];
+    row.cells['Item ID'] = after.legacyItemIds![0];
+    row.cells['Owner'] = 'human@example.com';
+    state = { version: 1, sheetId: 'sheet-1', items: {} };
+
+    const p = await run(normalize([ci('renamed-job')]), T2);
+    expect(p.counts.create).toBe(0);                        // adopted, not duplicated
+    expect(p.counts.missing).toBe(0);
+    expect(target.rows).toHaveLength(1);
+    expect(row.cells['Item ID']).toBe(after.itemId);
+    expect(row.cells['Owner']).toBe('human@example.com');   // their column carried over
+  });
+});

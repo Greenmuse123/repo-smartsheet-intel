@@ -61,6 +61,18 @@ function reviewRule(sheetReview: boolean, cache: boolean | undefined, mirror: bo
   return { baseline, humanOwns, drift: false, write: (want) => (humanOwns ? {} : reviewCells(want)) };
 }
 
+/**
+ * Does a sheet row's `Source` point at the same file as this item?
+ *
+ * `Source` is `path[:line] - evidence type…`, and a redacted path carries a discriminator
+ * derived from the row's own Item ID - which is exactly what changes when the ID is widened.
+ * Compare the file only, with any discriminator normalised away.
+ */
+function sameSourcePath(source: string, repositoryPath: string): boolean {
+  const strip = (v: string) => v.split(' - ')[0].replace(/:\d+$/, '').replace(/\[REDACTED-[0-9a-f]+\]/g, '[REDACTED]');
+  return strip(source) === strip(repositoryPath);
+}
+
 export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncState, now: string): SyncPlan {
   const byItemId = new Map<string, TargetRow>();
   const allRowsForId = new Map<string, TargetRow[]>();
@@ -111,12 +123,15 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       for (const legacy of item.legacyItemIds ?? []) {
         const old = byItemId.get(legacy);
         if (!old || duplicateIds.has(legacy) || seen.has(legacy)) continue;
-        // The candidate is just a string, and any row could happen to carry it. A genuine
-        // legacy row is the SAME item under an older ID, so its Item text must match: identity
-        // is derived from that text, and if the text had changed the ID would have too. Without
-        // this an unrelated row could be adopted and have its repo-controlled fields replaced.
-        if (String(old.cells['Item'] ?? '') !== item.item) {
-          log.warn(`Not adopting sheet row ${legacy}: it carries that older Item ID but its Item text does not match, so it is not the same item.`);
+        // The candidate is just a string, and any row could happen to carry it, so check that
+        // the row really is this item before replacing its repo-controlled fields.
+        //
+        // Not by Item text: for the path-keyed extractors (CI, tests, ADR) identity is the path
+        // alone, so a job or heading can be renamed without changing the ID at all - and
+        // rejecting those left a human-owned row stranded as Missing. Compare the source file
+        // instead, which IS part of every identity.
+        if (!sameSourcePath(String(old.cells['Source'] ?? ''), item.repositoryPath)) {
+          log.warn(`Not adopting sheet row ${legacy}: it carries that older Item ID but points at a different file, so it is not the same item.`);
           continue;
         }
         if ((legacyClaims.get(legacy) ?? 0) > 1) {
@@ -135,7 +150,14 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
     }
     // Carry the cached baselines across the rename, or adoption would look like a row we have
     // never written - which is exactly the "no baseline, never converges" state below.
-    const st = state.items[item.itemId] ?? (adoptedFrom ? state.items[adoptedFrom] : undefined);
+    //
+    // When we adopt, the cache that belongs to the row IN FRONT OF US is the one filed under
+    // the OLD id. A cache under the new id describes a different physical row (one an earlier
+    // split created and a person has since deleted), and preferring it made the two records
+    // disagree, which reads as drift and ends up clearing a real human tick two runs later.
+    const st = adoptedFrom
+      ? (state.items[adoptedFrom] ?? state.items[item.itemId])
+      : state.items[item.itemId];
     const sheetFingerprint = String(row.cells['Repo Fingerprint'] ?? st?.fingerprint ?? '');
     const lastWrittenStatus = String(row.cells['Repo Status'] ?? st?.lastWrittenStatus ?? '');
     const sheetStatus = String(row.cells['Status'] ?? '');
@@ -260,11 +282,15 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
       const pendingReview = writeReview(reviewAfterUpdate);
       const reviewChanges = Object.entries(pendingReview).some(([k, v]) => row.cells[k] !== v);
       if (reviewChanges) {
+        // ONLY the review cells. `repoCells` would rewrite `Repo Status` and `Repo Fingerprint`
+        // - the merge baselines - for what is a checkbox repair, and on a row whose Status
+        // baseline was stale that silently destroyed a real both-sides-moved conflict. A
+        // targeted repair must stay targeted.
         changes.push({
           action: 'update',
           item,
           rowId: row.rowId,
-          cells: { ...repoCells(item, (String(row.cells['Sync Status'] ?? '') || 'Synced') as SyncStatus, now), ...pendingReview },
+          cells: { ...pendingReview, 'Last Synced': now },
           reasons: ['review flag brought back into line with the item'],
         });
         continue;
