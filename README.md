@@ -13,7 +13,7 @@ Repository → Scanner → Extractors → Normalized Project Model → Validatio
 
 - Works with **or without** Smartsheet API access (CSV fallback).
 - `sync --dry-run` shows every change before anything is written.
-- 128 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, the required-column guard on the real Smartsheet target, invalid credentials, authorization vs. token errors, plan-restriction errors, rate-limit retries, and dry-run safety. They run against a fake `fetch`; no test performs a live API call.
+- 130 automated tests cover extraction, no-fabrication, redaction of every outbound field, deduplication, updates, protected human fields, the missing/reappearing and conflict lifecycles, the required-column guard on the real Smartsheet target, invalid credentials, authorization vs. token errors, plan-restriction errors, rate-limit retries, and dry-run safety. They run against a fake `fetch`; no test performs a live API call.
 
 ---
 
@@ -131,7 +131,7 @@ app/
     adapters/csv.ts          CSV + column-definitions fallback
     report/report.ts         Repository Intelligence Report
     log/logger.ts            plain-language logging
-  tests/                     vitest suites (128 tests)
+  tests/                     vitest suites (130 tests)
   examples/sample-repo/      "Orderly" demo repository + sample-repo.project-config.yaml
   docs/                      DATA-MAPPING.md · smartsheet-import.md · DEMO.md
 ```
@@ -141,7 +141,7 @@ app/
 ```
 cd app
 npm install
-npm test          # 128 tests
+npm test          # 130 tests
 npm run typecheck
 ```
 
@@ -308,14 +308,29 @@ The computer reads the sticky notes inside the toy box, copies them neatly onto 
   needs review. That is deliberate: a stale flag costs someone a glance, and clearing a real
   one loses a decision silently. Rows created by `setup-sheet` and synced by this tool always
   carry the record, so this only affects hand-made rows.
-- **Upgrading a sheet made before the ID widened:** the digest went from 8 to 12 hex characters,
-  which changes every `Item ID`. The next sync does **not** duplicate your rows: for each item
-  the planner looks for the row carrying that item's old, shorter ID and **adopts it**, rewriting
-  the identity in place. Owner, Priority, Due Date, Dependency, Milestone and Management Notes
-  are human-controlled columns that the tool never rewrites, so they carry over untouched, and
-  nothing is marked `Missing in Repo`. The plan says `adopted the existing row for RSI-…` for
-  each one. Run `sync --dry-run` first if you want to see the list before anything is written.
+- **Upgrading a sheet made by an older build:** the digest went from 8 to 12 hex characters,
+  which changes every `Item ID`. The next sync does not duplicate your rows where it can prove
+  the match: for each item the planner looks for the row carrying that item's older ID and
+  **adopts it**, rewriting the identity in place. Human-controlled columns are never rewritten,
+  so Owner, Priority, Due Date, Dependency, Milestone and Management Notes carry over untouched.
+  The plan says `adopted the existing row for RSI-...` for each one.
+
+  Adoption asks for proof, not resemblance, because getting it wrong would attach one person's
+  notes to the wrong work and could not be undone. It adopts when the row is for the same file
+  **and** either the item is one whose identity is its path (CI, tests, ADR) or the row still
+  carries this item's fingerprint. Two cases therefore do **not** adopt, on purpose:
+
+  - the item's content changed in the same run, so there is no proof left; and
+  - the item's text or path contains a secret. Identity used to be computed from the redacted
+    form, and redaction is exactly what makes two different items look identical - such rows
+    share their old ID, their published Source and their fingerprint, so nothing on the sheet
+    can tell them apart.
+
+  In both cases you get a fresh row and the old one flagged `Missing in Repo` with every value
+  you put on it still there, which you can merge by hand. Run `sync --dry-run` first to see the
+  list before anything is written.
+
 - **State management:** local `state.json` is a cache; `Item ID` + `Repo Fingerprint` + `Repo Status` + `Repo Review` in the sheet are sufficient to rebuild it (tested). Those four plus `Sync Status` are enforced as required columns: `SmartsheetTarget` refuses to sync a sheet missing any of them rather than silently mislabelling edits.
 - **Security:** sensitive-path gate before ignore rules, regex redaction at the excerpt boundary, env-only credentials, no repo writes.
 - **Conflict handling:** human-controlled columns written on create only; shared columns merged; conflicts keep the human value and flag.
-- **Testing:** 128 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.
+- **Testing:** 130 vitest cases including fake-`fetch` client tests and an in-memory `SheetTarget` for engine tests.

@@ -1227,34 +1227,60 @@ describe('round-12 review regressions', () => {
 });
 
 describe('round-13 review regressions', () => {
-  it('recognises the ID an older build gave a secret-bearing item (R13)', async () => {
-    // Identity used to be computed from the REDACTED evidence. Moving it to the original text
-    // changed the published ID of every item containing a secret, so a sheet synced by an
-    // older build held them under IDs this build no longer recognised - stranding the Owner,
-    // Priority and Notes a person had put on those rows.
-    const e: RawEvidence = {
-      extractor: 'todo-comments', sourceType: 'TODO comment', path: 'src/a.ts', line: 1,
-      excerpt: 'TODO: rotate token=abcdefghijkl before launch',
-    };
-    const [item] = normalize([e]);
-    await run(normalize([e]), T1);
+  it('will not adopt two secret-bearing items onto one row just because they redact alike (R14)', async () => {
+    // Identity used to be computed from the REDACTED evidence, so secret-bearing items have a
+    // different published ID on an older sheet. Offering that older ID as an alias would let
+    // those rows be adopted - but redaction is the very operation that makes two different
+    // items identical, so the alias cannot tell them apart, and neither can anything else on
+    // the sheet: they share the alias, the published Source AND the fingerprint.
+    const withSecret = (secret: string, line: number): RawEvidence => ({
+      extractor: 'todo-comments', sourceType: 'TODO comment', path: 'src/a.ts', line,
+      excerpt: `TODO: rotate token=${secret} before launch`,
+    });
+    const [ia] = normalize([withSecret('aaaaaaaaaaaa', 1)]);
+    const [ib] = normalize([withSecret('bbbbbbbbbbbb', 9)]);
+    expect(ia.itemId).not.toBe(ib.itemId);                  // distinct identities...
+    await run(normalize([withSecret('bbbbbbbbbbbb', 9)]), T1);
     const row = target.rows[0];
+    expect(row.cells['Description']).toBe(target.rows[0].cells['Description']); // ...that publish alike
+    row.cells['Owner'] = 'owner-of-b@example.com';
+    row.cells['Management Notes'] = 'belongs to B';
 
-    // What the previous build would have published: the identity taken from redacted text.
-    const redacted: RawEvidence = { ...e, excerpt: String(row.cells['Description'] ?? '') };
-    const legacyFromRedacted = item.legacyItemIds!.filter((id) => id !== item.itemId);
-    expect(legacyFromRedacted.length).toBeGreaterThan(1); // both bases, both digest lengths
+    // Whatever older ID that row might be wearing, A must never take it over.
+    for (const candidate of [...(ia.legacyItemIds ?? []), ib.itemId, ...(ib.legacyItemIds ?? [])]) {
+      row.cells['Item ID'] = candidate;
+      const before = { owner: row.cells['Owner'], notes: row.cells['Management Notes'] };
+      await run(normalize([withSecret('aaaaaaaaaaaa', 1)]), T2);
+      expect(row.cells['Owner']).toBe(before.owner);
+      expect(row.cells['Management Notes']).toBe(before.notes);
+      target.rows = target.rows.filter((r) => r.rowId === row.rowId);
+      state = { version: 1, sheetId: 'sheet-1', items: {} };
+    }
+  });
 
-    row.cells['Item ID'] = legacyFromRedacted.find((id) => id.length === item.itemId.length)!;
-    row.cells['Owner'] = 'human@example.com';
+  it('will not adopt a row that is another live item\u2019s current identity (R14)', async () => {
+    // An older alias of one item can equal the CURRENT id of another. That row is not a
+    // leftover - it belongs to a live item - so adopting it planned two writes to one physical
+    // row and left one of the items without a row at all, decided purely by scan order.
+    //
+    // The row here is built so the proof gate WOULD pass for A (A's own Source and fingerprint),
+    // which is the only situation in which this guard is what stops the collision.
+    const a = ev('src/a.js', 'one');
+    const b = ev('src/b.js', 'two');
+    const [ia, ib] = normalize([a, b]);
+    await run(items(a), T1);                                // one row, carrying A's content
+    const row = target.rows[0];
+    row.cells['Item ID'] = ib.itemId;                       // ...but wearing B's live identity
+    (ia as { legacyItemIds?: string[] }).legacyItemIds = [ib.itemId];
     state = { version: 1, sheetId: 'sheet-1', items: {} };
 
-    const p = await run(normalize([e]), T2);
-    expect(p.counts.create).toBe(0);                       // recognised, not re-created
-    expect(row.cells['Item ID']).toBe(item.itemId);
-    expect(row.cells['Owner']).toBe('human@example.com');
-    expect(JSON.stringify(target.rows)).not.toContain('abcdefghijkl'); // still never published
-    void redacted;
+    const plan = planSync([ia, ib], await target.readRows(), state, T2);
+    await applyPlan(plan, target, state, T2);
+
+    const writesToThatRow = plan.changes.filter((c) => c.rowId === row.rowId && c.action !== 'unchanged');
+    expect(writesToThatRow).toHaveLength(1);                // never two items writing one row
+    expect(target.rows.filter((r) => r.cells['Item ID'] === ia.itemId)).toHaveLength(1);
+    expect(target.rows.filter((r) => r.cells['Item ID'] === ib.itemId)).toHaveLength(1);
   });
 
   it('will not adopt a same-fingerprint row that belongs to a different file (R13)', async () => {
@@ -1271,5 +1297,34 @@ describe('round-13 review regressions', () => {
     const p = await run(items(a), T2);
     expect(p.counts.create).toBe(1);
     expect(row.cells['Owner']).toBe('owner-elsewhere@example.com');
+  });
+});
+
+describe('a raised warning must survive every baseline history (round-14 R14-04)', () => {
+  it('stays ticked from any starting cache/mirror combination', async () => {
+    // Leaving the baselines merely untouched was not enough: in several reachable states they
+    // already said true, so the ticked box looked like ours and the next run cleared it. The
+    // raise now pins both baselines to false, which every ownership rule reads as the person's.
+    for (const cache of [undefined, false, true]) {
+      for (const mirror of [undefined, false, true]) {
+        target = new MemoryTarget(COLUMN_TITLES, 'sheet-1');
+        state = { version: 1, sheetId: 'sheet-1', items: {} };
+        await run(items(ev('src/a.js', 'one')), T1);
+        const row = target.rows[0];
+        const id = items(ev('src/a.js', 'one'))[0].itemId;
+
+        row.cells['Repo Status'] = 'Done';                 // stale mirror
+        row.cells['Status'] = 'In Progress';               // and somebody disagrees
+        if (mirror === undefined) delete row.cells['Repo Review']; else row.cells['Repo Review'] = mirror;
+        if (cache === undefined) delete state.items[id]; else state.items[id].lastWrittenHumanReview = cache;
+
+        await run(items(ev('src/a.js', 'one')), T2);
+        expect(row.cells['Human Review'], `raised with cache=${cache} mirror=${mirror}`).toBe(true);
+        await run(items(ev('src/a.js', 'one')), T3);
+        expect(row.cells['Human Review'], `still raised with cache=${cache} mirror=${mirror}`).toBe(true);
+        await run(items(ev('src/a.js', 'one')), '2026-08-24T13:00:00Z');
+        expect(row.cells['Human Review'], `run 4 with cache=${cache} mirror=${mirror}`).toBe(true);
+      }
+    }
   });
 });

@@ -69,22 +69,28 @@ export function isPathKeyed(itemId: string): boolean {
   return [...PATH_KEYED].some((e) => CODE[e] === code);
 }
 
-export function legacyItemIdsFor(ev: RawEvidence, ...alsoFrom: RawEvidence[]): string[] {
+export function legacyItemIdsFor(ev: RawEvidence): string[] {
   const code = CODE[ev.extractor] ?? 'XX';
-  const out = new Set<string>();
-  // Every identity basis this tool has ever used, at every digest length it has ever published.
-  // `alsoFrom` carries the REDACTED evidence: identity used to be computed from that, so an
-  // item whose text or path contains a secret has a different published ID on any sheet synced
-  // by an older build - and without this it would be treated as a brand new item, leaving the
-  // person's Owner, Priority and Notes stranded on a row marked "Missing in Repo".
-  for (const basis of [ev, ...alsoFrom]) {
-    const full = createHash('sha1').update(identityKey(basis)).digest('hex');
-    for (const n of [ID_HEX, ...LEGACY_ID_HEX]) out.add(`RSI-${code}-${full.slice(0, n)}`);
-  }
-  const current = `RSI-${code}-${createHash('sha1').update(identityKey(ev)).digest('hex').slice(0, ID_HEX)}`;
-  out.delete(current);
+  const full = createHash('sha1').update(identityKey(ev)).digest('hex');
+  const out = new Set(LEGACY_ID_HEX.map((n) => `RSI-${code}-${full.slice(0, n)}`));
+  out.delete(`RSI-${code}-${full.slice(0, ID_HEX)}`);
   return [...out];
 }
+
+/*
+ * A note on what is deliberately NOT here.
+ *
+ * Identity used to be computed from the REDACTED evidence, so an item whose text or path
+ * contains a secret has a different published ID on a sheet synced by an older build. Offering
+ * that older ID as an alias would let such rows be adopted - but redaction is exactly the
+ * operation that makes two different items identical, so those aliases cannot tell them apart,
+ * and neither can anything else on the sheet: two items that redact alike share the alias, the
+ * published Source AND the fingerprint.
+ *
+ * Adopting on that basis would silently move one person's Owner and Management Notes onto the
+ * wrong work. Refusing costs a fresh row and a "Missing in Repo" flag on the old one, with
+ * every human value still sitting on it, which a person can merge. That trade is not close.
+ */
 
 /**
  * Fields whose change means "the repository moved". Deliberately excludes `sourceReference`

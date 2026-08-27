@@ -138,6 +138,7 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
   // Owner and Management Notes to whichever item happened to come first in the scan. Count the
   // claims and refuse to adopt any ID more than one item could mean.
   const legacyClaims = new Map<string, number>();
+  const currentIds = new Set(items.map((i) => i.itemId));
   for (const it of items) {
     for (const legacy of it.legacyItemIds ?? []) legacyClaims.set(legacy, (legacyClaims.get(legacy) ?? 0) + 1);
   }
@@ -168,6 +169,13 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
         // instead, which IS part of every identity.
         if (!looksLikeSameItem(old, item)) {
           log.warn(`Not adopting sheet row ${legacy}: it carries that older Item ID but is not this item, so its contents are left alone.`);
+          continue;
+        }
+        if (currentIds.has(legacy)) {
+          // This older ID is some OTHER item's CURRENT identity, so that row is not a leftover -
+          // it belongs to a live item. Adopting it would plan two writes to one row and leave
+          // the other item without one, and which of them won depended on scan order.
+          log.warn(`Not adopting sheet row ${legacy}: that is the current Item ID of another item, so the row is not an old copy of this one.`);
           continue;
         }
         if ((legacyClaims.get(legacy) ?? 0) > 1) {
@@ -341,11 +349,13 @@ export function planSync(items: ProjectItem[], rows: TargetRow[], state: SyncSta
           cells: {
             'Repo Status': item.status,
             'Last Synced': now,
-            // Tick the box WITHOUT its mirror. That deliberately leaves the two disagreeing,
-            // which the ownership rule reads as "a person put this here" - so we will never
-            // recompute it away on the next run. A warning that clears itself one run later is
-            // no warning at all; this one stays until somebody actually dismisses it.
-            ...(somebodyDisagrees ? { 'Human Review': true } : {}),
+            // Tick the box and pin BOTH baselines to false. Every ownership rule then reads
+            // the ticked box as "a person put this here", so we never recompute it away - and
+            // because the two baselines agree with each other it is not mistaken for drift
+            // either. Leaving them merely untouched was not enough: in six of the eighteen
+            // reachable baseline states they already said true, and the warning cleared itself
+            // on the next run. A warning that clears itself is no warning at all.
+            ...(somebodyDisagrees ? { 'Human Review': true, 'Repo Review': false } : {}),
           },
           reviewRaisedForHuman: somebodyDisagrees,
           reasons: somebodyDisagrees
@@ -593,7 +603,7 @@ function remember(state: SyncState, c: PlannedChange, rowId: number, now: string
     // A tick we raised for a person is not ours: leaving the baseline where it was makes the
     // sheet and the baseline disagree, which is exactly how the ownership rule records "theirs".
     lastWrittenHumanReview: c.reviewRaisedForHuman
-      ? carried
+      ? false
       : (c.cells as CellValues)['Human Review'] !== undefined
       ? (c.cells as CellValues)['Human Review'] === true
       : (c.cells as CellValues)['Repo Review'] !== undefined
